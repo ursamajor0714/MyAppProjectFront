@@ -184,15 +184,9 @@ export default function HomeScreen() {
     setWizardStep('internal_external');
     resetZoom();
 
-    if (!hasAnimated.current) {
-      hasAnimated.current = true;
-      sheetTranslateY.setValue(SCREEN_H * 1);
-      Animated.timing(sheetTranslateY, {
-        toValue: 0,
-        duration: 1000,
-        useNativeDriver: true,
-      }).start();
-    }
+    // 즉시 나타나도록 슬라이드 애니메이션 제거
+    sheetTranslateY.setValue(0);
+    hasAnimated.current = true;
   }, [setPart]);
 
   const handleClose = useCallback(() => {
