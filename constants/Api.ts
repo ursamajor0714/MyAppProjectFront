@@ -1,1 +1,1 @@
-export const API_URL = 'https://myappproject-jvyd.onrender.com';
+export const API_URL = 'https://myappprojectback.onrender.com';
