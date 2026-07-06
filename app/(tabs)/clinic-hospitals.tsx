@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -483,18 +483,26 @@ export default function HospitalListScreen() {
                     setIsBookingOpen(true);
                   }}
                 >
-                  <Text style={styles.modalReserveBtnText}>🗓️ 진료 예약하기</Text>
+                  <Text style={styles.modalReserveBtnText}>진료 예약하기</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={styles.modalTelemedicineBtn}
                   activeOpacity={0.85}
                   onPress={() => {
+                    const hId = selectedHospital?.id;
                     setSelectedHospital(null);
-                    router.push('/telemedicine-empty');
+                    if (hId) {
+                      router.push({
+                        pathname: '/telemedicine',
+                        params: { hospitalId: hId.toString() }
+                      });
+                    } else {
+                      router.push('/telemedicine');
+                    }
                   }}
                 >
-                  <Text style={styles.modalTelemedicineBtnText}>📞 비대면 진료받기</Text>
+                  <Text style={styles.modalTelemedicineBtnText}>비대면 진료받기</Text>
                 </TouchableOpacity>
               </View>
             </View>

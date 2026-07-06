@@ -173,10 +173,6 @@ export default function SymptomResultScreen() {
           </View>
         ) : null}
 
-        {
-          // 디버깅을 위한 렌더링 로그 출력
-          console.log(`[SymptomResult] Rendering ID: ${record.id}, Risk: ${record.riskLevel}, Inferred: ${record.inferredCause}`)
-        }
 
         {/* ── 행동 이동 버튼 (비대면 연결 및 모든 증상 연동 지원) ── */}
         <View style={{ gap: 8, marginTop: 12, width: '100%' }}>
@@ -198,11 +194,11 @@ export default function SymptomResultScreen() {
 
             <TouchableOpacity
               style={styles.actionBtnTertiary}
-              onPress={() => router.replace({
-                pathname: '/clinic-hospitals',
+              onPress={() => router.push({
+                pathname: '/telemedicine',
                 params: {
-                  fromDiagnosis: 'true',
-                  reportId: record.id
+                  reportId: record.id,
+                  fromResult: 'true'
                 }
               })}
               activeOpacity={0.85}

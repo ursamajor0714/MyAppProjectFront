@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useEffect } from 'react';
 import {
   View,
   Text,
@@ -38,6 +38,7 @@ export default function CartScreen() {
         </TouchableOpacity>
       ),
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigation, cart.length]);
 
   const handleCheckout = () => {

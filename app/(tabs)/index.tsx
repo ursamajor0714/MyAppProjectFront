@@ -6,6 +6,8 @@ import {
   Dimensions,
   TouchableOpacity,
   ScrollView,
+  Modal,
+  Alert,
 } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -54,7 +56,7 @@ export default function HomeScreen() {
 
   useEffect(() => {
     loadHistory();
-  }, []);
+  }, [loadHistory]);
 
   // Intro animation states
   const greetingOpacity = useRef(new Animated.Value(0)).current;
@@ -160,6 +162,7 @@ export default function HomeScreen() {
         }, 400);
       });
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const startHintLoop = () => {
@@ -187,6 +190,7 @@ export default function HomeScreen() {
     // 즉시 나타나도록 슬라이드 애니메이션 제거
     sheetTranslateY.setValue(0);
     hasAnimated.current = true;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setPart]);
 
   const handleClose = useCallback(() => {
@@ -195,6 +199,7 @@ export default function HomeScreen() {
     resetZoom();
     hasAnimated.current = false;
     sheetTranslateY.setValue(0);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetCurrentDiagnosis]);
 
   const handleBack = () => {
@@ -295,9 +300,9 @@ export default function HomeScreen() {
               <View style={[styles.bodyArea, { height: bodyAreaHeight }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, marginTop: 8, alignItems: 'center', width: '100%', zIndex: 50 }}>
                   <Animated.View style={[styles.hintRow, { transform: [{ scale: hintScale }], flex: 1, marginVertical: 0 }]}>
-                    <Text style={styles.hintIcon}>{user?.age && user.age < 14 ? '🧒' : '👆'}</Text>
+                    <Text style={styles.hintIcon}>{user?.age && Number(user.age) < 14 ? '🧒' : '👆'}</Text>
                     <Text style={[styles.hintLabel, { fontSize: 12 }]} numberOfLines={1}>
-                      {user?.age && user.age < 14
+                      {user?.age && Number(user.age) < 14
                         ? `아동 진단 모드 (만 ${user.age}세)`
                         : '신체 부위를 탭해 주세요'}
                     </Text>
@@ -327,7 +332,7 @@ export default function HomeScreen() {
                         <HumanBody
                           selectedPart={currentDiagnosis.part}
                           onPress={handlePartPress}
-                          isChild={user?.age !== undefined && user.age < 14}
+                          isChild={user?.age !== undefined && Number(user.age) < 14}
                         />
                       </View>
                     </Reanimated.View>

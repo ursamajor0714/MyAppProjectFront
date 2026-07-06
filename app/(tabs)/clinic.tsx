@@ -5,6 +5,7 @@ import {
   StyleSheet,
   Animated,
   TouchableOpacity,
+  ScrollView,
 } from 'react-native';
 import { router } from 'expo-router';
 
@@ -28,6 +29,7 @@ export default function ClinicScreen() {
         useNativeDriver: true,
       }),
     ]).start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const [isAnimating, setIsAnimating] = useState(false);
   const transitionTo = (nextState: ScreenState) => {
@@ -108,6 +110,7 @@ export default function ClinicScreen() {
               style={[
                 styles.card,
                 {
+                  flex: 1,
                   backgroundColor: '#E8F5E9',
                   borderColor: '#A5D6A7',
                 },
@@ -134,6 +137,7 @@ export default function ClinicScreen() {
               style={[
                 styles.card,
                 {
+                  flex: 1,
                   backgroundColor: '#E3F2FD',
                   borderColor: '#90CAF9',
                 },
@@ -155,13 +159,19 @@ export default function ClinicScreen() {
             </TouchableOpacity>
           </View>
         ) : (
-          <View style={styles.buttonWrapper}>
+          <ScrollView
+            style={{ flex: 1 }}
+            contentContainerStyle={{ gap: 14, paddingBottom: 20 }}
+            showsVerticalScrollIndicator={false}
+          >
+            {/* 1. 아픈 곳 자가진단 */}
             <TouchableOpacity
               activeOpacity={0.95}
               onPress={handleSelfCheckPress}
               style={[
                 styles.card,
                 {
+                  height: 135,
                   backgroundColor: '#FFF3E0',
                   borderColor: '#FFB74D',
                 },
@@ -169,25 +179,39 @@ export default function ClinicScreen() {
             >
               <View style={styles.contentWrap}>
                 <Text style={styles.iconText}>🩺</Text>
-
-                <Text style={styles.cardTitle}>
-                  아픈 곳 자가진단
-                </Text>
-
-                <Text style={styles.cardSub}>
-                  간단한 증상을 선택하여
-                  {'\n'}
-                  자가진단을 시작합니다.
-                </Text>
+                <Text style={styles.cardTitle}>아픈 곳 자가진단</Text>
+                <Text style={styles.cardSub}>불편 부위와 세부 증상을 선택하여 분석 결과를 도출합니다.</Text>
               </View>
             </TouchableOpacity>
 
+            {/* 2. 비대면 화상 진료 (신규) */}
+            <TouchableOpacity
+              activeOpacity={0.95}
+              onPress={() => router.push('/telemedicine')}
+              style={[
+                styles.card,
+                {
+                  height: 135,
+                  backgroundColor: '#E0F2F1',
+                  borderColor: '#4DB6AC',
+                },
+              ]}
+            >
+              <View style={styles.contentWrap}>
+                <Text style={styles.iconText}>📹</Text>
+                <Text style={styles.cardTitle}>비대면 화상 진료</Text>
+                <Text style={styles.cardSub}>원격으로 전면 카메라를 연결해 실시간 화상 진료를 진행합니다.</Text>
+              </View>
+            </TouchableOpacity>
+
+            {/* 3. 대면 진료 병원 예약 */}
             <TouchableOpacity
               activeOpacity={0.95}
               onPress={() => router.push('/clinic-hospitals' as any)}
               style={[
                 styles.card,
                 {
+                  height: 135,
                   backgroundColor: '#F3E5F5',
                   borderColor: '#BA68C8',
                 },
@@ -195,19 +219,11 @@ export default function ClinicScreen() {
             >
               <View style={styles.contentWrap}>
                 <Text style={styles.iconText}>🏥</Text>
-
-                <Text style={styles.cardTitle}>
-                  병원 선택하기
-                </Text>
-
-                <Text style={styles.cardSub}>
-                  가까운 병원을 검색하고
-                  {'\n'}
-                  진료 예약을 진행합니다.
-                </Text>
+                <Text style={styles.cardTitle}>대면 진료 병원 예약</Text>
+                <Text style={styles.cardSub}>주변 의원을 선택해 직접 내원 예약 및 접수를 접수합니다.</Text>
               </View>
             </TouchableOpacity>
-          </View>
+          </ScrollView>
         )}
       </Animated.View>
     </View>
@@ -245,7 +261,6 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   card: {
-    flex: 1,
     borderRadius: 36,
     borderWidth: 2,
     justifyContent: 'center',
@@ -259,24 +274,24 @@ const styles = StyleSheet.create({
   contentWrap: {
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
+    padding: 12,
   },
   iconText: {
-    fontSize: 52,
-    marginBottom: 16,
+    fontSize: 34,
+    marginBottom: 6,
   },
   cardTitle: {
-    fontSize: 26,
+    fontSize: 18,
     fontWeight: '900',
     color: '#1A1A1A',
-    marginBottom: 8,
+    marginBottom: 4,
     textAlign: 'center',
   },
   cardSub: {
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: '600',
     color: '#555555',
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 16,
   },
 });

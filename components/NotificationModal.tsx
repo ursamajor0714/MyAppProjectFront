@@ -12,7 +12,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useNotificationStore, NotificationItem } from '../store/useNotificationStore';
 
-const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
+const { height: SCREEN_H } = Dimensions.get('window');
 
 export default function NotificationModal() {
   const {

@@ -11,8 +11,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSymptomStore } from '../../../store/symptomData';
 import { useCartStore } from '../../../store/useCartStore';
 import { useNotificationStore } from '../../../store/useNotificationStore';
-import { SYMPTOM_CATEGORIES, TYPE_TAGS, PRODUCTS, Product } from '../../../constants/shopData';
-import { styles } from './shop.styles';
+import { SYMPTOM_CATEGORIES, TYPE_TAGS, PRODUCTS } from '../../../constants/shopData';
+import { styles } from './_shop.styles';
 
 export default function ShopScreen() {
   const [searchText, setSearchText] = useState('');
@@ -113,6 +113,7 @@ export default function ShopScreen() {
         </View>
       ),
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigation, totalCartCount, unreadCount]);
 
   // 최근 자가진단 연동 추천 필터

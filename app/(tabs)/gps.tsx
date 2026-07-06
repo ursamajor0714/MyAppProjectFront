@@ -8,11 +8,10 @@ import {
   Modal,
   Alert,
   Platform,
-  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
-import { Audio } from 'expo-av'; // 모바일 오디오 재생 지원
+import { createAudioPlayer, AudioModule } from 'expo-audio'; // expo-av deprecated → expo-audio 마이그레이션
 import { useGpsStore } from '../../store/useGpsStore';
 import { useNotificationStore } from '../../store/useNotificationStore';
 import { styles } from '../../styles/gps.styles';
@@ -20,13 +19,14 @@ import { styles } from '../../styles/gps.styles';
 let WebView: any = null;
 if (Platform.OS !== 'web') {
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     WebView = require('react-native-webview').WebView;
   } catch (e) {
     console.warn('react-native-webview load error:', e);
   }
 }
 
-const { width: SCREEN_W } = Dimensions.get('window');
+
 
 // ── 더미 질환 리스트 ──
 const ILLNESS_LIST = ['치매', '천식', '당뇨', '심장질환', '뇌질환'];
@@ -132,7 +132,6 @@ export default function GpsScreen() {
   const {
     settings,
     currentCoords,
-    isTracking,
     setConsent,
     updateSettings,
     setCurrentCoords,
@@ -155,7 +154,7 @@ export default function GpsScreen() {
   const sirenIntervalRef = useRef<any>(null);
   const countdownIntervalRef = useRef<any>(null);
   const iframeRef = useRef<any>(null);
-  const soundRef = useRef<Audio.Sound | null>(null); // 모바일 오디오 인스턴스 래퍼 추가
+  const soundRef = useRef<any>(null); // 모바일 오디오 인스턴스 래퍼 추가
 
   // 보호 대상자 연동 로직
   const handleLinkRequest = () => {
@@ -214,7 +213,7 @@ export default function GpsScreen() {
       setConsent(true);
       setPermissionError(null);
       fetchCurrentLocation();
-    } catch (e) {
+    } catch {
       setPermissionError('권한 요청 중 오류 발생');
       setConsent(false);
     }
@@ -295,19 +294,20 @@ export default function GpsScreen() {
       return;
     }
 
-    // 모바일 네이티브 (expo-av) 재생 로직
+    // 모바일 네이티브 (expo-audio) 재생 로직
     try {
-      await Audio.setAudioModeAsync({
-        playsInSilentModeIOS: true,
-        shouldRouteAudioToSpeakerIfSeen: true,
-        staysActiveInBackground: true,
+      AudioModule.setAudioModeAsync({
+        playsInSilentMode: true,
+        shouldRouteThroughEarpiece: false,
       });
 
-      const { sound } = await Audio.Sound.createAsync(
-        { uri: 'https://assets.mixkit.co/active_storage/sfx/950/950-84.wav' }, // 파상형 사이렌 음원
-        { shouldPlay: true, isLooping: true, volume: 1.0 }
+      const player = createAudioPlayer(
+        { uri: 'https://assets.mixkit.co/active_storage/sfx/950/950-84.wav' }
       );
-      soundRef.current = sound;
+      player.loop = true;
+      player.volume = 1.0;
+      player.play();
+      soundRef.current = player;
       setIsSirenPlaying(true);
     } catch (e) {
       console.warn('Mobile siren audio play error:', e);
@@ -322,22 +322,22 @@ export default function GpsScreen() {
     if (oscRef.current) {
       try {
         oscRef.current.stop();
-      } catch (e) {}
+      } catch {}
       oscRef.current = null;
     }
     if (audioCtxRef.current) {
       try {
         audioCtxRef.current.close();
-      } catch (e) {}
+      } catch {}
       audioCtxRef.current = null;
     }
 
-    // 모바일 소리 정지 및 메모리 언로드
+    // 모바일 소리 정지 및 메모리 해제
     if (soundRef.current) {
       try {
-        await soundRef.current.stopAsync();
-        await soundRef.current.unloadAsync();
-      } catch (e) {}
+        soundRef.current.pause();
+        soundRef.current.remove();
+      } catch {}
       soundRef.current = null;
     }
     setIsSirenPlaying(false);
@@ -396,6 +396,7 @@ export default function GpsScreen() {
       stopSirenSound();
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 아동 연령 제한에 따른 안내 문구

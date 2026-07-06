@@ -29,14 +29,7 @@ import {
     weight: string;
   }
 
-  type FieldProps = {
-    name: keyof RegisterForm;
-    label: string;
-    placeholder: string;
-    rules?: RegisterOptions<RegisterForm>;
-    keyboardType?: 'default' | 'email-address' | 'phone-pad' | 'number-pad';
-    secureTextEntry?: boolean;
-  };
+
   
   export default function RegisterScreen() {
     const insets = useSafeAreaInsets();

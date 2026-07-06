@@ -109,6 +109,7 @@ export default function ProfileScreen() {
     if (isLoggedIn) {
       fetchSettingsFromServer();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoggedIn]);
 
   // GPS 모달 오픈 시 기존 상태 복사

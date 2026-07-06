@@ -10,7 +10,7 @@ import {
   TextInput,
   Alert,
 } from 'react-native';
-import { useForm, Controller, RegisterOptions } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,13 +22,7 @@ interface LoginForm {
   password: string;
 }
 
-type FieldProps = {
-  name: keyof LoginForm;
-  label: string;
-  placeholder: string;
-  rules?: RegisterOptions<LoginForm>;
-  keyboardType?: 'default' | 'email-address' | 'phone-pad' | 'number-pad';
-};
+
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();

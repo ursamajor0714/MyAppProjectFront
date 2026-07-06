@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   View,
   Text,
@@ -6,7 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
-  Alert,
+
   Switch,
 } from 'react-native';
 import { router } from 'expo-router';
@@ -69,14 +69,14 @@ export default function HealthReportScreen() {
 
     setTimeout(() => {
       setSendState('sending');
-      setSendProgress(`${guardianPhone} 보호자 보안 통신 채널 개설 및 리포트 송신 중...`);
+      setSendProgress(`${guardianName} (${guardianPhone}) 보호자 보안 통신 채널 개설 및 리포트 송신 중...`);
 
       setTimeout(() => {
         setSendState('success');
         // 알림 센터 추가
         useNotificationStore.getState().addNotification({
           title: '📊 주간 건강 리포트 공유 완료',
-          body: `보호자 (${guardianPhone})에게 주간 건강 리포트(보안 PDF)가 안전하게 전송되었습니다.`,
+          body: `${guardianName} (${guardianPhone})에게 주간 건강 리포트(보안 PDF)가 안전하게 전송되었습니다.`,
           type: 'general',
         });
       }, 1500);

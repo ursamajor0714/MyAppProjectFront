@@ -31,7 +31,7 @@ export function useTelemedicine() {
   const [hospitals, setHospitals] = useState<HospitalInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const pollingInterval = useRef<NodeJS.Timeout | null>(null);
+  const pollingInterval = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // 1. 주변 협력 병원 리스트 조회
   const fetchHospitals = async () => {
