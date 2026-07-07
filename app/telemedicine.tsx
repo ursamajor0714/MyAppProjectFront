@@ -179,6 +179,13 @@ export default function TelemedicineScreen() {
   const startClinicSession = async (doctor: Doctor) => {
     if (!selectedHospital) return;
 
+    // [iOS/모바일 브라우저 대응] 사용자 클릭 이벤트 내부에서 미리 카메라/마이크 권한을 획득하여 홀딩합니다.
+    // 비동기 소켓 콜백 안에서 getUserMedia를 호출하면 브라우저 보안 정책(Safari 등)에 의해 차단될 수 있습니다.
+    const preStream = await startLocalStream();
+    if (!preStream) {
+      return; // 권한 획득 실패 시 접수를 진행하지 않음
+    }
+
     try {
       // 1. 백엔드 DB 세션 접수 생성
       const session = await api.post('/api/telemedicine/sessions', {
@@ -211,7 +218,7 @@ export default function TelemedicineScreen() {
       // 의사 접속 완료 -> WebRTC 셋업
       socket.on('clinic-ready', async () => {
         console.log('의사 입장 감지 ➡️ WebRTC 연결 개시');
-        const stream = await startLocalStream();
+        const stream = localStreamRef.current || await startLocalStream();
         if (stream) {
           const pc = await setupPeerConnection(stream);
           await createAndSendOffer(pc);
