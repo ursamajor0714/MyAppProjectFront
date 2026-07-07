@@ -79,7 +79,7 @@ export default function TelemedicineScreen() {
         remoteVideoRef.current.srcObject = remoteStream;
       }
     }
-  }, [localStream, remoteStream]);
+  }, [localStream, remoteStream, isCallActive]);
 
   // 대기 중일 때 대기열 가상 타이머 (소켓 연결 실패 시의 폴백 보조용)
   useEffect(() => {
