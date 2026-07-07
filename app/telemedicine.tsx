@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,9 +13,18 @@ import {
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as SecureStore from '../utils/secureStoreHelper';
+import io from 'socket.io-client';
 import { HOSPITALS, Hospital, Doctor } from '../constants/hospitalData';
-
+import { api } from '../services/api';
+import { API_URL } from '../constants/Api';
+import {
+  RTCPeerConnection,
+  RTCSessionDescription,
+  RTCIceCandidate,
+  mediaDevices,
+  RTCView
+} from '../utils/webrtcShim';
 
 const { height: SCREEN_H } = Dimensions.get('window');
 
@@ -24,70 +33,255 @@ type ClinicStep = 'hospital' | 'doctor' | 'waiting';
 export default function TelemedicineScreen() {
   const insets = useSafeAreaInsets();
   const { hospitalId, reportId, fromResult } = useLocalSearchParams<{ hospitalId?: string; reportId?: string; fromResult?: string }>();
-  const [step, setStep] = useState<ClinicStep>('hospital'); // 기본값 hospital로 시작하여 일반 진입 시 병원 목록이 먼저 뜨게 함
+  const [step, setStep] = useState<ClinicStep>('hospital');
 
-  
-  // 카메라 권한 훅
-  const [permission, requestPermission] = useCameraPermissions();
-  
   // 상태 변수
   const [selectedHospital, setSelectedHospital] = useState<Hospital | null>(null);
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
   const [waitingNumber, setWaitingNumber] = useState(3);
   const [waitingTime, setWaitingTime] = useState(8);
 
+  // WebRTC 및 실시간 소켓 상태
+  const [sessionId, setSessionId] = useState<number | null>(null);
+  const [isCallActive, setIsCallActive] = useState(false);
+  const [localStream, setLocalStream] = useState<any>(null);
+  const [remoteStream, setRemoteStream] = useState<any>(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isVideoOff, setIsVideoOff] = useState(false);
+
+  const socketRef = useRef<any>(null);
+  const peerConnectionRef = useRef<any>(null);
+  const localStreamRef = useRef<any>(null);
+  const sessionIdRef = useRef<number | null>(null);
+  const localVideoRef = useRef<any>(null);
+  const remoteVideoRef = useRef<any>(null);
+
   // 비대면 가능한 병원 필터링 (가까운 병원 3~4개 구성)
   const telemedicineHospitals = HOSPITALS.filter(h => h.id <= 4);
 
-  // 의료법 준수: 특정 추천병원 자동지정(알선) 금지에 따라, 모든 진입 경로에서 환자가 병원을 직접 선택할 수 있도록 병원 선택 단계('hospital')가 무조건 첫 화면으로 뜹니다.
+  // 의료법 준수: 특정 추천병원 자동지정(알선) 금지에 따라, 환자가 병원을 직접 선택할 수 있도록 첫 화면으로 고정
   useEffect(() => {
     setSelectedHospital(null);
     setStep('hospital');
+    return () => {
+      cleanupMediaAndSocket();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hospitalId, reportId, fromResult]);
 
-  // 카메라 권한 요청
+  // Web 브라우저 환경에서 스트림을 비디오 돔 요소에 바인딩
   useEffect(() => {
-    (async () => {
-      if (permission && !permission.granted && permission.canAskAgain) {
-        await requestPermission();
+    if (Platform.OS === 'web') {
+      if (localVideoRef.current && localStream) {
+        localVideoRef.current.srcObject = localStream;
       }
-    })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [permission]);
+      if (remoteVideoRef.current && remoteStream) {
+        remoteVideoRef.current.srcObject = remoteStream;
+      }
+    }
+  }, [localStream, remoteStream]);
 
-  // 대기 시간 줄어드는 타이머 시뮬레이션
+  // 대기 중일 때 대기열 가상 타이머 (소켓 연결 실패 시의 폴백 보조용)
   useEffect(() => {
     let timer: any;
-    if (step === 'waiting') {
+    if (step === 'waiting' && !isCallActive) {
       timer = setInterval(() => {
-        setWaitingTime((prev) => {
-          if (prev <= 1) {
-            clearInterval(timer);
-            Alert.alert('진료 시작', '의사 선생님이 진료실에 입장하셨습니다. 화면을 확인해 주세요!', [
-              { text: '확인', onPress: () => {} }
-            ]);
-            return 0;
-          }
-          return prev - 1;
-        });
+        setWaitingTime((prev) => (prev > 1 ? prev - 1 : 1));
         setWaitingNumber((prev) => (prev > 1 ? prev - 1 : 1));
-      }, 5000); // 5초마다 대기순번 감소 시뮬레이션
+      }, 10000);
     }
     return () => clearInterval(timer);
-  }, [step]);
+  }, [step, isCallActive]);
 
-  const handleHospitalSelect = (hospital: Hospital) => {
-    setSelectedHospital(hospital);
-    setStep('doctor');
+  // 로컬 미디어 (카메라 & 마이크) 스트림 시작
+  const startLocalStream = async () => {
+    try {
+      const stream = await mediaDevices.getUserMedia({
+        audio: true,
+        video: {
+          facingMode: 'user',
+          width: 480,
+          height: 360
+        }
+      });
+      setLocalStream(stream);
+      localStreamRef.current = stream;
+      return stream;
+    } catch (error) {
+      console.error('로컬 카메라/마이크 캡처 실패:', error);
+      Alert.alert('권한 오류', '화상 진료를 위한 카메라/마이크 캡처 권한을 획득하지 못했습니다. 설정에서 확인해 주세요.');
+      return null;
+    }
   };
 
-  const handleDoctorSelect = (doctor: Doctor) => {
-    setSelectedDoctor(doctor);
-    setWaitingNumber(Math.floor(Math.random() * 4) + 2); // 2~5명 무작위 대기순번
-    setWaitingTime(Math.floor(Math.random() * 5) + 6); // 6~10분 무작위 대기시간
-    setStep('waiting');
+  // WebRTC 피어 연결 생성 및 이벤트 바인딩
+  const setupPeerConnection = async (stream: any) => {
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' }
+      ]
+    });
+
+    // 로컬 스트림 트랙 추가
+    if (stream) {
+      if (Platform.OS === 'web') {
+        stream.getTracks().forEach((track: any) => {
+          pc.addTrack(track, stream);
+        });
+      } else {
+        pc.addStream(stream);
+      }
+    }
+
+    // ICE Candidate 시그널링 전송
+    pc.onicecandidate = (event: any) => {
+      if (event.candidate && socketRef.current) {
+        socketRef.current.emit('ice-candidate', {
+          candidate: event.candidate,
+          sessionId: sessionIdRef.current
+        });
+      }
+    };
+
+    // 리모트 스트림 수신 이벤트 바인딩
+    if (Platform.OS === 'web') {
+      pc.ontrack = (event: any) => {
+        const rStream = event.streams[0];
+        setRemoteStream(rStream);
+      };
+    } else {
+      pc.onaddstream = (event: any) => {
+        setRemoteStream(event.stream);
+      };
+    }
+
+    peerConnectionRef.current = pc;
+    return pc;
   };
 
+  // WebRTC 통화 생성 (Offer 생성 및 전송)
+  const createAndSendOffer = async (pc: any) => {
+    try {
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      
+      socketRef.current.emit('webrtc-offer', {
+        offer,
+        sessionId: sessionIdRef.current
+      });
+      console.log('WebRTC Offer 전송 성공');
+    } catch (e) {
+      console.error('Offer 생성 실패:', e);
+    }
+  };
+
+  // 비대면 진료 접수 및 실시간 소켓/WebRTC 수립 시작
+  const startClinicSession = async (doctor: Doctor) => {
+    if (!selectedHospital) return;
+
+    try {
+      // 1. 백엔드 DB 세션 접수 생성
+      const session = await api.post('/api/telemedicine/sessions', {
+        doctorName: doctor.name,
+        department: selectedHospital.dept,
+        hospitalName: selectedHospital.name,
+        symptomDetails: '비대면 종합 원격 화상 진료 접수'
+      });
+
+      setSessionId(session.id);
+      sessionIdRef.current = session.id;
+      setWaitingNumber(session.waitQueueNumber || 1);
+      setWaitingTime((session.waitQueueNumber || 1) * 3);
+      setStep('waiting');
+
+      // 2. 소켓 연결
+      const token = await SecureStore.getItemAsync('auth_token');
+      const socket = io(API_URL, {
+        auth: { token },
+        transports: ['websocket']
+      });
+
+      socketRef.current = socket;
+
+      socket.on('connect', () => {
+        console.log('시그널링 소켓 연결 완료. 룸 조인 시도.');
+        socket.emit('join-clinic', { sessionId: session.id });
+      });
+
+      // 의사 접속 완료 -> WebRTC 셋업
+      socket.on('clinic-ready', async () => {
+        console.log('의사 입장 감지 ➡️ WebRTC 연결 개시');
+        const stream = await startLocalStream();
+        if (stream) {
+          const pc = await setupPeerConnection(stream);
+          await createAndSendOffer(pc);
+        }
+      });
+
+      // 의사로부터의 Offer 처리
+      socket.on('webrtc-offer', async ({ offer }: any) => {
+        console.log('의사로부터 Offer 수신');
+        let pc = peerConnectionRef.current;
+        if (!pc) {
+          const stream = localStreamRef.current || await startLocalStream();
+          pc = await setupPeerConnection(stream);
+        }
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socket.emit('webrtc-answer', { answer, sessionId: sessionIdRef.current });
+          setIsCallActive(true);
+        } catch (e) {
+          console.error('Offer 처리 중 오류:', e);
+        }
+      });
+
+      // 의사로부터의 Answer 처리
+      socket.on('webrtc-answer', async ({ answer }: any) => {
+        console.log('의사로부터 Answer 수신');
+        const pc = peerConnectionRef.current;
+        if (pc) {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(answer));
+            setIsCallActive(true);
+          } catch (e) {
+            console.error('Answer 처리 중 오류:', e);
+          }
+        }
+      });
+
+      // ICE Candidate 중계 수신
+      socket.on('ice-candidate', async ({ candidate }: any) => {
+        const pc = peerConnectionRef.current;
+        if (pc) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (e) {
+            console.warn('Candidate 추가 실패:', e);
+          }
+        }
+      });
+
+      // 의사가 진료 완료/종료 시
+      socket.on('clinic-closed', () => {
+        cleanupMediaAndSocket();
+        Alert.alert('진료 완료', '비대면 진료가 성료되었습니다. 마이페이지에서 의료 영수증 수납을 완료해 주세요.', [
+          { text: '확인', onPress: () => router.replace('/(tabs)/profile') }
+        ]);
+      });
+
+      socket.on('connect_error', (err) => {
+        console.warn('소켓 연결 거부:', err);
+      });
+
+    } catch (e: any) {
+      console.error('진료 신청 에러:', e);
+      Alert.alert('접수 실패', e.message || '서버 오류로 진료 접수가 불가능합니다.');
+    }
+  };
+
+  // 대기 중인 진료 취소 및 자원 해제
   const handleCancelWaiting = () => {
     Alert.alert(
       '진료 취소',
@@ -97,7 +291,16 @@ export default function TelemedicineScreen() {
         {
           text: '예',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
+            if (sessionId) {
+              try {
+                // 환자의 진료 자발적 취소
+                await api.put(`/api/telemedicine/sessions/${sessionId}`, { status: 'cancelled' });
+              } catch (e) {
+                console.warn('서버 세션 취소 실패:', e);
+              }
+            }
+            cleanupMediaAndSocket();
             setStep('doctor');
             setSelectedDoctor(null);
           },
@@ -106,7 +309,58 @@ export default function TelemedicineScreen() {
     );
   };
 
+  // 자원 초기화 청소기
+  const cleanupMediaAndSocket = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track: any) => track.stop());
+      localStreamRef.current = null;
+      setLocalStream(null);
+    }
+    setRemoteStream(null);
+
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+
+    if (socketRef.current) {
+      socketRef.current.emit('leave-clinic', { sessionId: sessionIdRef.current });
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
+
+    setSessionId(null);
+    sessionIdRef.current = null;
+    setIsCallActive(false);
+  };
+
+  const toggleMute = () => {
+    if (localStream) {
+      const audioTrack = localStream.getAudioTracks()[0];
+      if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        setIsMuted(!audioTrack.enabled);
+      }
+    }
+  };
+
+  const toggleVideo = () => {
+    if (localStream) {
+      const videoTrack = localStream.getVideoTracks()[0];
+      if (videoTrack) {
+        videoTrack.enabled = !videoTrack.enabled;
+        setIsVideoOff(!videoTrack.enabled);
+      }
+    }
+  };
+
+  const handleHospitalSelect = (hospital: Hospital) => {
+    setSelectedHospital(hospital);
+    setStep('doctor');
+  };
+
   const handleGoBackSafe = () => {
+    cleanupMediaAndSocket();
     if (router.canGoBack()) {
       router.back();
     } else {
@@ -116,188 +370,228 @@ export default function TelemedicineScreen() {
 
   return (
     <View style={styles.container}>
-      {/* ── 상단 절반: 비디오 카메라 화면 ── */}
+      {/* ── 상단 영역: WebRTC 비디오 스트림 화면 ── */}
       <View style={styles.cameraSection}>
-        {permission?.granted ? (
-          <>
-            <CameraView style={styles.camera} facing="front" />
-            <View style={[styles.cameraOverlay, { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 }]}>
+        {isCallActive ? (
+          // ── 통화 연결 중 ──
+          <View style={styles.callWrapper}>
+            {/* 상대방 (의사) 렌더링 - 전체 화면 */}
+            {Platform.OS === 'web' ? (
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                style={styles.webRemoteVideo}
+              />
+            ) : (
+              <RTCView stream={remoteStream} style={styles.nativeRemoteVideo} />
+            )}
+
+            {/* 내 화면 (로컬) 렌더링 - 우측 상단 플로팅 미니어처 */}
+            {!isVideoOff && (
+              <View style={styles.floatingLocalView}>
+                {Platform.OS === 'web' ? (
+                  <video
+                    ref={localVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    style={styles.webLocalVideo}
+                  />
+                ) : (
+                  <RTCView stream={localStream} style={styles.nativeLocalVideo} />
+                )}
+              </View>
+            )}
+
+            {/* 통화 중인 의사 정보 배너 오버레이 */}
+            <View style={styles.callHeaderOverlay}>
               <View style={styles.liveBadge}>
                 <View style={styles.liveDot} />
-                <Text style={styles.liveText}>LIVE</Text>
+                <Text style={styles.liveText}>진료중 (LIVE)</Text>
               </View>
-              <Text style={styles.cameraUserLabel}>환자 화면 (전면 카메라)</Text>
+              <Text style={styles.doctorLabel}>{selectedDoctor?.name} 전문의</Text>
             </View>
-          </>
-        ) : (
-          <View style={[styles.camera, styles.cameraPlaceholder]}>
-            <Ionicons name="videocam-off" size={48} color="#94A3B8" />
-            <Text style={styles.cameraPlaceholderText}>
-              카메라 화면을 준비 중이거나 권한이 없습니다.
-            </Text>
-            {!permission?.granted && permission?.canAskAgain && (
-              <TouchableOpacity
-                style={styles.permissionBtn}
-                onPress={requestPermission}
-              >
-                <Text style={styles.permissionBtnText}>카메라 권한 승인하기</Text>
+
+            {/* 하단 통화 제어 패널 */}
+            <View style={styles.callControlPanel}>
+              <TouchableOpacity style={[styles.controlBtn, isMuted && styles.controlBtnActive]} onPress={toggleMute}>
+                <Ionicons name={isMuted ? 'mic-off' : 'mic'} size={22} color={isMuted ? '#FFF' : '#333'} />
               </TouchableOpacity>
-            )}
+
+              <TouchableOpacity style={[styles.controlBtn, isVideoOff && styles.controlBtnActive]} onPress={toggleVideo}>
+                <Ionicons name={isVideoOff ? 'videocam-off' : 'videocam'} size={22} color={isVideoOff ? '#FFF' : '#333'} />
+              </TouchableOpacity>
+
+              <TouchableOpacity style={[styles.controlBtn, styles.hangUpBtn]} onPress={handleCancelWaiting}>
+                <Ionicons name="call" size={22} color="#FFF" style={{ transform: [{ rotate: '135deg' }] }} />
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : (
+          // ── 통화 대기 또는 준비 전 ──
+          <View style={styles.cameraPlaceholder}>
+            <Ionicons name="videocam" size={48} color="#64748B" />
+            <Text style={styles.cameraPlaceholderText}>
+              진료실 입장 시 카메라 화상 통화가 활성화됩니다.
+            </Text>
           </View>
         )}
-        
-        {/* 헤더 백버튼 오버레이 */}
-        <TouchableOpacity
-          onPress={handleGoBackSafe}
-          style={[styles.headerBackBtn, { top: insets.top > 0 ? insets.top : 16 }]}
-          activeOpacity={0.7}
-        >
-          <Ionicons name="chevron-back" size={24} color="#1E293B" />
-        </TouchableOpacity>
+
+        {/* 헤더 백버튼 */}
+        {!isCallActive && (
+          <TouchableOpacity
+            onPress={handleGoBackSafe}
+            style={[styles.headerBackBtn, { top: insets.top > 0 ? insets.top : 16 }]}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="chevron-back" size={24} color="#1E293B" />
+          </TouchableOpacity>
+        )}
       </View>
 
-      {/* ── 하단 절반: 정보 및 컨트롤 패널 ── */}
-      <View style={styles.controlSection}>
-        {step === 'hospital' && (
-          <View style={styles.panelContainer}>
-            <View style={styles.panelHeaderWithBack}>
-              <TouchableOpacity onPress={handleGoBackSafe} style={styles.panelBackBtn}>
-                <Ionicons name="arrow-back" size={20} color="#64748B" />
-              </TouchableOpacity>
-              <View>
-                <Text style={styles.panelTitle}>비대면 진료 가능한 병원</Text>
-                <Text style={styles.panelSub}>진료받으실 가까운 병원을 선택해 주세요.</Text>
-              </View>
-            </View>
-
-            <ScrollView
-              style={styles.scrollArea}
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {telemedicineHospitals.map((hospital) => (
-                <TouchableOpacity
-                  key={hospital.id}
-                  style={styles.hospitalCard}
-                  onPress={() => handleHospitalSelect(hospital)}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.cardHeader}>
-                    <View style={styles.hospitalBadge}>
-                      <Text style={styles.hospitalBadgeText}>{hospital.dept}</Text>
-                    </View>
-                    <Text style={styles.distanceText}>{hospital.distance}</Text>
-                  </View>
-                  <Text style={styles.hospitalName}>{hospital.name}</Text>
-                  <Text style={styles.hospitalIntro} numberOfLines={1}>
-                    {hospital.intro}
-                  </Text>
-                  <View style={styles.cardFooter}>
-                    <View style={styles.ratingRow}>
-                      <Ionicons name="star" size={14} color="#F59E0B" />
-                      <Text style={styles.ratingText}>{hospital.rating}</Text>
-                    </View>
-                    <View style={styles.statusRow}>
-                      <View style={[styles.statusDot, { backgroundColor: hospital.open ? '#10B981' : '#EF4444' }]} />
-                      <Text style={styles.statusText}>{hospital.open ? '진료중' : '진료종료'}</Text>
-                    </View>
-                  </View>
+      {/* ── 하단 영역: 제어/리스트 컨트롤 패널 ── */}
+      {!isCallActive && (
+        <View style={styles.controlSection}>
+          {step === 'hospital' && (
+            <View style={styles.panelContainer}>
+              <View style={styles.panelHeaderWithBack}>
+                <TouchableOpacity onPress={handleGoBackSafe} style={styles.panelBackBtn}>
+                  <Ionicons name="arrow-back" size={20} color="#64748B" />
                 </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {step === 'doctor' && selectedHospital && (
-          <View style={styles.panelContainer}>
-            <View style={styles.panelHeaderWithBack}>
-              <TouchableOpacity 
-                onPress={() => setStep('hospital')} 
-                style={styles.panelBackBtn}
-              >
-                <Ionicons name="arrow-back" size={20} color="#64748B" />
-              </TouchableOpacity>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.panelTitle} numberOfLines={1}>{selectedHospital.name}</Text>
-                <Text style={styles.panelSub}>진료받으실 전담 의사를 선택해 주세요.</Text>
-              </View>
-            </View>
-
-            <ScrollView
-              style={styles.scrollArea}
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {selectedHospital.doctors.map((doctor, idx) => (
-                <TouchableOpacity
-                  key={idx}
-                  style={styles.doctorCard}
-                  onPress={() => handleDoctorSelect(doctor)}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.doctorAvatar}>
-                    <Text style={styles.doctorAvatarEmoji}>👨‍⚕️</Text>
-                  </View>
-                  <View style={styles.doctorInfo}>
-                    <Text style={styles.doctorName}>{doctor.name} 전문의</Text>
-                    <Text style={styles.doctorRole}>{doctor.role}</Text>
-                    <Text style={styles.doctorIntro} numberOfLines={1}>{doctor.intro}</Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        )}
-
-        {step === 'waiting' && selectedHospital && selectedDoctor && (
-          <View style={styles.waitingContainer}>
-            {/* 똥글똥글 도는 이모티콘 및 로딩 */}
-            <View style={styles.waitingStatusArea}>
-              <View style={styles.loadingSpinnerContainer}>
-                <ActivityIndicator size="large" color="#6366F1" style={styles.nativeSpinner} />
-                <View style={styles.spinnerEmojiContainer}>
-                  <Text style={styles.spinningEmoji}>🩺</Text>
+                <View>
+                  <Text style={styles.panelTitle}>비대면 진료 가능한 병원</Text>
+                  <Text style={styles.panelSub}>진료받으실 가까운 병원을 선택해 주세요.</Text>
                 </View>
               </View>
-              
-              <Text style={styles.waitingTitle}>진료 대기 중</Text>
-              <Text style={styles.waitingSub}>
-                {selectedHospital.name} 의 {selectedDoctor.name} 의사 선생님의 진료를 대기 중입니다.
-              </Text>
-            </View>
 
-            {/* 대기 정보 보드 */}
-            <View style={styles.waitingBoard}>
-              <View style={styles.boardItem}>
-                <Text style={styles.boardLabel}>내 대기 번호</Text>
-                <Text style={styles.boardValue}>{waitingNumber}명</Text>
+              <ScrollView
+                style={styles.scrollArea}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {telemedicineHospitals.map((hospital) => (
+                  <TouchableOpacity
+                    key={hospital.id}
+                    style={styles.hospitalCard}
+                    onPress={() => handleHospitalSelect(hospital)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.cardHeader}>
+                      <View style={styles.hospitalBadge}>
+                        <Text style={styles.hospitalBadgeText}>{hospital.dept}</Text>
+                      </View>
+                      <Text style={styles.distanceText}>{hospital.distance}</Text>
+                    </View>
+                    <Text style={styles.hospitalName}>{hospital.name}</Text>
+                    <Text style={styles.hospitalIntro} numberOfLines={1}>
+                      {hospital.intro}
+                    </Text>
+                    <View style={styles.cardFooter}>
+                      <View style={styles.ratingRow}>
+                        <Ionicons name="star" size={14} color="#F59E0B" />
+                        <Text style={styles.ratingText}>{hospital.rating}</Text>
+                      </View>
+                      <View style={styles.statusRow}>
+                        <View style={[styles.statusDot, { backgroundColor: hospital.open ? '#10B981' : '#EF4444' }]} />
+                        <Text style={styles.statusText}>{hospital.open ? '진료중' : '진료종료'}</Text>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
+          {step === 'doctor' && selectedHospital && (
+            <View style={styles.panelContainer}>
+              <View style={styles.panelHeaderWithBack}>
+                <TouchableOpacity 
+                  onPress={() => setStep('hospital')} 
+                  style={styles.panelBackBtn}
+                >
+                  <Ionicons name="arrow-back" size={20} color="#64748B" />
+                </TouchableOpacity>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.panelTitle} numberOfLines={1}>{selectedHospital.name}</Text>
+                  <Text style={styles.panelSub}>진료받으실 전담 의사를 선택해 주세요.</Text>
+                </View>
               </View>
-              <View style={styles.verticalDivider} />
-              <View style={styles.boardItem}>
-                <Text style={styles.boardLabel}>예상 대기 시간</Text>
-                <Text style={styles.boardValue}>{waitingTime}분</Text>
+
+              <ScrollView
+                style={styles.scrollArea}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {selectedHospital.doctors.map((doctor, idx) => (
+                  <TouchableOpacity
+                    key={idx}
+                    style={styles.doctorCard}
+                    onPress={() => startClinicSession(doctor)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.doctorAvatar}>
+                      <Text style={styles.doctorAvatarEmoji}>👨‍⚕️</Text>
+                    </View>
+                    <View style={styles.doctorInfo}>
+                      <Text style={styles.doctorName}>{doctor.name} 전문의</Text>
+                      <Text style={styles.doctorRole}>{doctor.role}</Text>
+                      <Text style={styles.doctorIntro} numberOfLines={1}>{doctor.intro}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </View>
+          )}
+
+          {step === 'waiting' && selectedHospital && selectedDoctor && (
+            <View style={styles.waitingContainer}>
+              <View style={styles.waitingStatusArea}>
+                <View style={styles.loadingSpinnerContainer}>
+                  <ActivityIndicator size="large" color="#6366F1" style={styles.nativeSpinner} />
+                  <View style={styles.spinnerEmojiContainer}>
+                    <Text style={styles.spinningEmoji}>🩺</Text>
+                  </View>
+                </View>
+                
+                <Text style={styles.waitingTitle}>진료실 입장 대기 중</Text>
+                <Text style={styles.waitingSub}>
+                  {selectedHospital.name} 의 {selectedDoctor.name} 의사 선생님이 수락 시 즉시 화상 진료가 시작됩니다.
+                </Text>
               </View>
-            </View>
 
-            <View style={styles.infoAlert}>
-              <Ionicons name="information-circle-outline" size={18} color="#4F46E5" />
-              <Text style={styles.infoAlertText}>
-                차례가 되면 카메라 화면에 화상 진료 화면이 연결됩니다. 화면을 종료하지 마시고 대기해 주세요.
-              </Text>
-            </View>
+              {/* 대기 정보 보드 */}
+              <View style={styles.waitingBoard}>
+                <View style={styles.boardItem}>
+                  <Text style={styles.boardLabel}>내 대기 번호</Text>
+                  <Text style={styles.boardValue}>{waitingNumber}명</Text>
+                </View>
+                <View style={styles.verticalDivider} />
+                <View style={styles.boardItem}>
+                  <Text style={styles.boardLabel}>예상 대기 시간</Text>
+                  <Text style={styles.boardValue}>{waitingTime}분</Text>
+                </View>
+              </View>
 
-            {/* 대기 취소 버튼 */}
-            <TouchableOpacity
-              style={styles.cancelBtn}
-              onPress={handleCancelWaiting}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.cancelBtnText}>진료 취소하기</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-      </View>
+              <View style={styles.infoAlert}>
+                <Ionicons name="information-circle-outline" size={18} color="#4F46E5" />
+                <Text style={styles.infoAlertText}>
+                  차례가 오면 카메라와 통화 화면이 자동 연결됩니다. 화면을 켜둔 상태로 잠시만 기다려 주세요.
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={handleCancelWaiting}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.cancelBtnText}>진료 신청 취소하기</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+      )}
     </View>
   );
 }
@@ -305,7 +599,7 @@ export default function TelemedicineScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F172A', // 다크 테마 기반의 고급스러운 색상
+    backgroundColor: '#0F172A',
   },
   cameraSection: {
     height: SCREEN_H * 0.46,
@@ -313,16 +607,79 @@ const styles = StyleSheet.create({
     backgroundColor: '#1E293B',
     overflow: 'hidden',
   },
-  camera: {
+  cameraPlaceholder: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  cameraPlaceholderText: {
+    color: '#94A3B8',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 12,
+    lineHeight: 18,
+  },
+  headerBackBtn: {
+    position: 'absolute',
+    left: 16,
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    zIndex: 10,
+  },
+  callWrapper: {
+    flex: 1,
+    position: 'relative',
+  },
+  webRemoteVideo: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    backgroundColor: '#000',
+  },
+  nativeRemoteVideo: {
     flex: 1,
     width: '100%',
+    height: '100%',
   },
-  cameraOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.15)',
-    justifyContent: 'space-between',
-    padding: 16,
-    paddingTop: Platform.OS === 'ios' ? 70 : 50,
+  floatingLocalView: {
+    position: 'absolute',
+    top: 60,
+    right: 16,
+    width: 90,
+    height: 120,
+    borderRadius: 12,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: '#FFFFFF',
+    backgroundColor: '#000',
+    zIndex: 15,
+  },
+  webLocalVideo: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+  },
+  nativeLocalVideo: {
+    width: '100%',
+    height: '100%',
+  },
+  callHeaderOverlay: {
+    position: 'absolute',
+    top: 50,
+    left: 16,
+    zIndex: 14,
+    gap: 6,
   },
   liveBadge: {
     flexDirection: 'row',
@@ -345,56 +702,43 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '900',
   },
-  cameraUserLabel: {
+  doctorLabel: {
     color: '#FFFFFF',
-    fontSize: 12,
-    fontWeight: '700',
-    backgroundColor: 'rgba(0, 0, 0, 0.4)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-    alignSelf: 'flex-end',
+    fontSize: 14,
+    fontWeight: '800',
+    textShadowColor: 'rgba(0, 0, 0, 0.6)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 3,
   },
-  cameraPlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  cameraPlaceholderText: {
-    color: '#94A3B8',
-    fontSize: 12,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginTop: 12,
-    lineHeight: 18,
-  },
-  permissionBtn: {
-    marginTop: 16,
-    backgroundColor: '#6366F1',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
-  },
-  permissionBtnText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  headerBackBtn: {
+  callControlPanel: {
     position: 'absolute',
-    left: 16,
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255, 255, 255, 0.85)',
+    bottom: 24,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+    zIndex: 20,
+  },
+  controlBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
     alignItems: 'center',
     justifyContent: 'center',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.15,
     shadowRadius: 4,
-    elevation: 3,
-    zIndex: 10,
+    elevation: 4,
+  },
+  controlBtnActive: {
+    backgroundColor: '#EF4444',
+  },
+  hangUpBtn: {
+    backgroundColor: '#EF4444',
   },
   controlSection: {
     flex: 1,
@@ -412,10 +756,6 @@ const styles = StyleSheet.create({
   panelContainer: {
     flex: 1,
     paddingTop: 24,
-  },
-  panelHeader: {
-    paddingHorizontal: 20,
-    marginBottom: 16,
   },
   panelHeaderWithBack: {
     flexDirection: 'row',

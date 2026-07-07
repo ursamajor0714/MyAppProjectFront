@@ -1,4 +1,4 @@
-import * as SecureStore from 'expo-secure-store';
+import * as SecureStore from '../utils/secureStoreHelper';
 import { API_URL } from '../constants/Api';
 
 const TOKEN_KEY = 'auth_token';
