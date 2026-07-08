@@ -20,6 +20,7 @@ import { useAuthStore } from '../../store/useAuthStore';
 import { useSymptomStore } from '../../store/symptomData';
 import { useGpsStore } from '../../store/useGpsStore';
 import { useNotificationStore } from '../../store/useNotificationStore';
+import { api } from '../../services/api';
 import {
   validateCardNumber,
   validateCardExpiry,
@@ -31,7 +32,7 @@ import { styles } from '../../styles/profile.styles';
 
 // ── 카드 및 대상자 타입 정의 ──
 interface CreditCardItem {
-  id: string;
+  id: string | number;
   company: string;
   number: string;
   expiry: string;
@@ -59,31 +60,43 @@ export default function ProfileScreen() {
   const [activeModal, setActiveModal] = useState<'none' | 'diagnosis' | 'gps' | 'insurance' | 'orders' | 'cards'>('none');
 
   // 1. 카드 관리 상태
-  const [cards, setCards] = useState<CreditCardItem[]>([
-    { id: '1', company: '신한 국민행복카드', number: '4518-****-****-9018', expiry: '12/29', color: '#1E3A8A' },
-    { id: '2', company: '현대 메디케어카드', number: '5412-****-****-0122', expiry: '06/31', color: '#374151' },
-  ]);
+  const [cards, setCards] = useState<CreditCardItem[]>([]);
   const [newCardCompany, setNewCardCompany] = useState('');
   const [newCardNo, setNewCardNo] = useState('');
   const [newCardExp, setNewCardExp] = useState('');
 
-  // 2. 주문 내역 데이터 (상품 디테일 연동용)
-  const [orders] = useState([
-    { id: 'OD-20260702-88', name: '데일리 멀티비타민 90정', price: '18,900', date: '2026-07-02', status: '배송중', productId: 1 },
-    { id: 'OD-20260628-12', name: '루테인 지아잔틴 눈건강 60캡슐', price: '21,900', date: '2026-06-28', status: '배송완료', productId: 5 },
-    { id: 'OD-20260615-03', name: '가정용 스마트 자동 혈압계', price: '55,000', date: '2026-06-15', status: '배송완료', productId: 55 },
-  ]);
+  // 2. 주문 내역 데이터 (실제 API 연동)
+  interface OrderItem {
+    id: number;
+    total: number;
+    status: string;
+    items: { name: string; quantity: number; price: number }[] | null;
+    createdAt: string;
+  }
+  const [orders, setOrders] = useState<OrderItem[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
 
-  // 3. 비대면 진료 내역 데이터 (보험 청구 전용)
-  const [telemedicineRecords] = useState([
-    { id: 'T-20260702-01', hospital: '서울이비인후과', doctor: '김민준 의사', date: '2026-07-02', diagnosis: '급성 상기도염 (감기)', cost: '8,400원' },
-    { id: 'T-20260630-05', hospital: '가정의학과 건강의원', doctor: '이지혜 의사', date: '2026-06-30', diagnosis: '역류성 식도염 및 소화불량', cost: '12,500원' },
-    { id: 'T-20260624-03', hospital: '바른정형외과', doctor: '최재혁 의사', date: '2026-06-24', diagnosis: '발목 관절 염좌 및 통증', cost: '21,000원' },
-  ]);
+  // 3. 비대면 진료 내역 데이터 (실 DB API 연동)
+  interface TelemedicineRecord {
+    id: string;
+    sessionId: number;
+    hospital: string;
+    doctor: string;
+    department: string;
+    date: string;
+    diagnosis: string;
+    cost: string;
+    paid: boolean;
+    status: string;
+    prescriptionUrl: string | null;
+  }
+  const [telemedicineRecords, setTelemedicineRecords] = useState<TelemedicineRecord[]>([]);
+  const [telemedicineLoading, setTelemedicineLoading] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [selectedInsurance, setSelectedInsurance] = useState('현대해상');
-  const [claimMethod, setClaimMethod] = useState<'app' | 'fax'>('fax');
+  const [claimMethod, setClaimMethod] = useState<'email' | 'fax'>('fax');
   const [claimFaxNo, setClaimFaxNo] = useState('02-730-1011');
+  const [claimEmail, setClaimEmail] = useState('');
   const [claimStep, setClaimStep] = useState<ClaimStep>('form');
   const [claimLoadingText, setClaimLoadingText] = useState('의료 데이터 분석 및 서류 추출 중...');
 
@@ -108,9 +121,59 @@ export default function ProfileScreen() {
     loadFromStorage();
     if (isLoggedIn) {
       fetchSettingsFromServer();
+      if (user && user.email) {
+        setClaimEmail(user.email);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoggedIn]);
+  }, [isLoggedIn, user]);
+
+  useEffect(() => {
+    if (activeModal === 'cards') {
+      loadCards();
+    }
+    if (activeModal === 'orders') {
+      loadOrders();
+    }
+    if (activeModal === 'insurance') {
+      loadTelemedicineHistory();
+    }
+  }, [activeModal]);
+
+
+  const loadCards = async () => {
+    try {
+      const data = await api.get('/api/cards');
+      setCards(data);
+    } catch (e) {
+      console.warn('카드 목록 조회 오류:', e);
+    }
+  };
+
+  const loadOrders = async () => {
+    try {
+      setOrdersLoading(true);
+      const data = await api.get('/api/shop/stats');
+      setOrders(data.orders || []);
+    } catch (e) {
+      console.warn('주문 내역 조회 오류:', e);
+    } finally {
+      setOrdersLoading(false);
+    }
+  };
+
+  const loadTelemedicineHistory = async () => {
+    try {
+      setTelemedicineLoading(true);
+      const data = await api.get('/api/telemedicine/sessions/history');
+      setTelemedicineRecords(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.warn('비대면 진료 내역 조회 오류:', e);
+    } finally {
+      setTelemedicineLoading(false);
+    }
+  };
+
 
   // GPS 모달 오픈 시 기존 상태 복사
   const handleOpenGpsModal = () => {
@@ -229,7 +292,7 @@ export default function ProfileScreen() {
   };
 
   // 카드 등록
-  const handleAddCard = () => {
+  const handleAddCard = async () => {
     if (!newCardCompany.trim()) {
       Alert.alert('입력 오류', '카드 회사명을 입력해 주세요 (예: 신한카드).');
       return;
@@ -242,40 +305,55 @@ export default function ProfileScreen() {
       Alert.alert('입력 오류', '만료 기한은 MM/YY 양식(예: 12/29)으로 기입해 주세요.');
       return;
     }
-    const newCard: CreditCardItem = {
-      id: Math.random().toString(),
-      company: newCardCompany,
-      number: newCardNo.replace(/(\d{4})-\d{4}-\d{4}-(\d{4})/, '$1-****-****-$2'),
-      expiry: newCardExp,
-      color: ['#047857', '#6D28D9', '#B91C1C', '#C2410C'][Math.floor(Math.random() * 4)],
-    };
-    setCards([...cards, newCard]);
-    setNewCardCompany('');
-    setNewCardNo('');
-    setNewCardExp('');
 
-    useNotificationStore.getState().addNotification({
-      title: '💳 카드 등록 완료',
-      body: `새 결제 카드 (${newCardCompany})가 안전하게 등록되었습니다.`,
-      type: 'general',
-    });
-    Alert.alert('등록 완료', '결제 카드가 성공적으로 연동되었습니다.');
+    try {
+      let formattedNo = newCardNo.trim();
+      if (/^\d{16}$/.test(formattedNo)) {
+        formattedNo = formattedNo.replace(/(\d{4})(\d{4})(\d{4})(\d{4})/, '$1-$2-$3-$4');
+      }
+
+      const resCard = await api.post('/api/cards', {
+        company: newCardCompany.trim(),
+        number: formattedNo,
+        expiry: newCardExp.trim(),
+      });
+
+      setCards(prev => [resCard, ...prev]);
+      setNewCardCompany('');
+      setNewCardNo('');
+      setNewCardExp('');
+
+      useNotificationStore.getState().addNotification({
+        title: '💳 카드 등록 완료',
+        body: `새 결제 카드 (${newCardCompany})가 안전하게 등록되었습니다.`,
+        type: 'general',
+      });
+      Alert.alert('등록 완료', '결제 카드가 성공적으로 연동되었습니다.');
+    } catch (e: any) {
+      Alert.alert('오류', e.message || '카드 등록에 실패했습니다.');
+    }
   };
 
   // 카드 삭제
-  const handleDeleteCard = (id: string, company: string) => {
+  const handleDeleteCard = (id: string | number, company: string) => {
     Alert.alert('카드 삭제', `정말 ${company} 카드를 삭제하시겠습니까?`, [
       { text: '취소', style: 'cancel' },
       {
         text: '삭제',
         style: 'destructive',
-        onPress: () => {
-          setCards(cards.filter(c => c.id !== id));
-          useNotificationStore.getState().addNotification({
-            title: '💳 카드 삭제 완료',
-            body: `${company} 카드가 지갑에서 삭제되었습니다.`,
-            type: 'general',
-          });
+        onPress: async () => {
+          try {
+            await api.delete(`/api/cards/${id}`);
+            setCards(prev => prev.filter(c => c.id !== id));
+            useNotificationStore.getState().addNotification({
+              title: '💳 카드 삭제 완료',
+              body: `${company} 카드가 지갑에서 삭제되었습니다.`,
+              type: 'general',
+            });
+            Alert.alert('완료', '카드가 정상 삭제되었습니다.');
+          } catch (e) {
+            Alert.alert('오류', '카드 삭제에 실패했습니다.');
+          }
         }
       }
     ]);
@@ -340,22 +418,18 @@ export default function ProfileScreen() {
   };
 
   // 보험 청구 절차 진행
-  const handleStartClaim = () => {
+  const handleStartClaim = async () => {
     if (!selectedRecordId) {
       Alert.alert('진료 미선택', '청구할 비대면 진료 내역을 한 개 선택해주세요.');
       return;
     }
 
-    if (claimMethod === 'app') {
-      Alert.alert(
-        '서비스 준비 중',
-        '보험사 전용 앱 간편 연동 서비스는 현재 제휴 계약 및 보안망 연동 개발이 진행 중입니다. 팩스 전송 서비스를 이용해 주세요.',
-        [{ text: '확인' }]
-      );
+    if (claimMethod === 'email' && !claimEmail.trim()) {
+      Alert.alert('입력 요망', '청구 서류를 받아볼 이메일 주소를 입력해 주세요.');
       return;
     }
 
-    if (!claimFaxNo.trim()) {
+    if (claimMethod === 'fax' && !claimFaxNo.trim()) {
       Alert.alert('입력 요망', '보험금 청구서를 발송할 팩스번호를 정확히 기입해 주세요.');
       return;
     }
@@ -363,21 +437,46 @@ export default function ProfileScreen() {
     setClaimStep('loading');
     setClaimLoadingText('진료비 영수증 및 처방 세부 서류 추출 중...');
 
-    // 1초 뒤 두번째 단계
-    setTimeout(() => {
-      setClaimLoadingText(`의료 팩스 문서 생성 완료 및 ${selectedInsurance}(${claimFaxNo}) 전송 중...`);
+    try {
+      const record = telemedicineRecords.find(r => r.id === selectedRecordId);
 
-      // 1.5초 뒤 완료 단계
-      setTimeout(() => {
-        setClaimStep('success');
-        const record = telemedicineRecords.find(r => r.id === selectedRecordId);
-        useNotificationStore.getState().addNotification({
-          title: '🏥 비대면 진료 보험 청구 완료',
-          body: `${selectedInsurance}(팩스: ${claimFaxNo})에 실손의료비 청구가 처리 완료되었습니다. (진료과: ${record?.hospital}, 진료비: ${record?.cost})`,
-          type: 'booking',
+      if (claimMethod === 'email') {
+        setClaimLoadingText(`의료 PDF 문서 암호화 패키징 완료 및 이메일(${claimEmail}) 발송 중...`);
+        await api.post('/api/documents/send-email', {
+          email: claimEmail.trim(),
+          sessionId: record?.sessionId,
+          subject: `[건강체크 케어서비스] ${selectedInsurance} 실손의료비 보험 청구서`,
+          content: `안녕하세요, 건강체크 서비스입니다.\n요청하신 비대면 진료에 대한 실손의료비 보험 청구 서류가 안전하게 생성되어 전송되었습니다.\n\n[청구 내역 요약]\n- 진료 병원: ${record?.hospital} (${record?.doctor})\n- 진료과: ${record?.department || '-'}\n- 진료 일시: ${record?.date}\n- 자부담 금액: ${record?.cost}\n- 접수 보험사: ${selectedInsurance}\n\n본 이메일은 발신 전용이며, 자세한 처리 경과는 접수하신 보험사의 알림을 확인해 주세요.\n감사합니다.`,
         });
-      }, 1500);
-    }, 1000);
+
+        setTimeout(() => {
+          setClaimStep('success');
+          useNotificationStore.getState().addNotification({
+            title: '🏥 실손보험 이메일 청구 완료',
+            body: `${selectedInsurance} 청구 서류가 메일(${claimEmail})로 정상 전송되었습니다.`,
+            type: 'booking',
+          });
+        }, 1200);
+      } else {
+        setClaimLoadingText(`의료 팩스 규격 변환 완료 및 ${selectedInsurance}(팩스: ${claimFaxNo}) 전송 중...`);
+        await api.post('/api/documents/send-fax', {
+          faxNumber: claimFaxNo.trim(),
+          sessionId: record?.sessionId,
+        });
+
+        setTimeout(() => {
+          setClaimStep('success');
+          useNotificationStore.getState().addNotification({
+            title: '🏥 실손보험 팩스 청구 완료',
+            body: `${selectedInsurance}(팩스: ${claimFaxNo})에 실손의료비 청구서 송신이 완료되었습니다.`,
+            type: 'booking',
+          });
+        }, 1200);
+      }
+    } catch (e: any) {
+      setClaimStep('form');
+      Alert.alert('발송 실패', e.message || '서류를 전송하는 도중 에러가 발생했습니다.');
+    }
   };
 
   // 주문 내역 터치 시 상품 연결
@@ -474,6 +573,22 @@ export default function ProfileScreen() {
             <View style={styles.menuItemLeft}>
               <Ionicons name="medical" size={18} color="#4CAF82" />
               <Text style={styles.menuItemText}>자가진단 기록 보기</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/medication-settings')} activeOpacity={0.7}>
+            <View style={styles.menuItemLeft}>
+              <Ionicons name="bandage" size={18} color="#E53935" />
+              <Text style={styles.menuItemText}>복약 알림 관리</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.menuItem} onPress={() => router.push('/calendar-reservations')} activeOpacity={0.7}>
+            <View style={styles.menuItemLeft}>
+              <Ionicons name="calendar" size={18} color="#1E88E5" />
+              <Text style={styles.menuItemText}>진료/처방 예약 캘린더</Text>
             </View>
             <Ionicons name="chevron-forward" size={16} color="#CCCCCC" />
           </TouchableOpacity>
@@ -773,41 +888,52 @@ export default function ProfileScreen() {
             {claimStep === 'form' && (
               <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
                 
-                <Text style={styles.claimStepTitle}>1. 청구 청구대상 비대면 진료 내역 선택</Text>
+                <Text style={styles.claimStepTitle}>1. 청구대상 비대면 진료 내역 선택</Text>
                 <View style={styles.claimList}>
-                  {telemedicineRecords.map((record) => (
-                    <TouchableOpacity
-                      key={record.id}
-                      style={[styles.claimRadioBtn, selectedRecordId === record.id && styles.claimRadioBtnActive]}
-                      onPress={() => setSelectedRecordId(record.id)}
-                      activeOpacity={0.8}
-                    >
-                      <View style={[styles.radioCircle, selectedRecordId === record.id && styles.radioCircleActive]}>
-                        {selectedRecordId === record.id && <View style={styles.radioInner} />}
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.claimItemName}>🏥 비대면 진료: {record.hospital} ({record.doctor})</Text>
-                        <Text style={styles.claimItemMeta}>진단: {record.diagnosis} | 진료일: {record.date} | 자부담: {record.cost}</Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
+                  {telemedicineLoading ? (
+                    <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                      <ActivityIndicator size="small" color="#4CAF82" />
+                      <Text style={{ color: '#888', fontSize: 12, marginTop: 8 }}>진료 내역 불러오는 중...</Text>
+                    </View>
+                  ) : telemedicineRecords.length === 0 ? (
+                    <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+                      <Text style={{ fontSize: 28, marginBottom: 8 }}>🏥</Text>
+                      <Text style={{ color: '#888', fontSize: 13, textAlign: 'center' }}>
+                        완료된 비대면 진료 내역이 없습니다.{'\n'}비대면 진료 후 이 화면에서 보험 청구를 하실 수 있습니다.
+                      </Text>
+                    </View>
+                  ) : (
+                    telemedicineRecords.map((record) => (
+                      <TouchableOpacity
+                        key={record.id}
+                        style={[styles.claimRadioBtn, selectedRecordId === record.id && styles.claimRadioBtnActive]}
+                        onPress={() => setSelectedRecordId(record.id)}
+                        activeOpacity={0.8}
+                      >
+                        <View style={[styles.radioCircle, selectedRecordId === record.id && styles.radioCircleActive]}>
+                          {selectedRecordId === record.id && <View style={styles.radioInner} />}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.claimItemName}>🏥 {record.hospital} ({record.doctor})</Text>
+                          <Text style={styles.claimItemMeta}>
+                            {record.diagnosis} | {record.date} | 자부담: {record.cost}
+                            {record.paid ? ' ✅ 납부완료' : ''}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))
+                  )}
                 </View>
 
                 <Text style={styles.claimStepTitle}>2. 서류 제출 방식 선택</Text>
                 <View style={styles.radiusGrid}>
                   <TouchableOpacity
-                    style={[styles.radiusBtn, claimMethod === 'app' && styles.radiusBtnActive]}
-                    onPress={() => {
-                      setClaimMethod('app');
-                      Alert.alert(
-                        '개발 중',
-                        '보험사 앱 연동 서비스는 간편 제휴 준비 중입니다. 현재 빌드 버전에서는 [팩스 자동 전송]을 활용해 주세요.'
-                      );
-                    }}
+                    style={[styles.radiusBtn, claimMethod === 'email' && styles.radiusBtnActive]}
+                    onPress={() => setClaimMethod('email')}
                     activeOpacity={0.8}
                   >
-                    <Text style={[styles.radiusBtnText, claimMethod === 'app' && styles.radiusBtnTextActive]}>
-                      📲 어플 연동 [개발중]
+                    <Text style={[styles.radiusBtnText, claimMethod === 'email' && styles.radiusBtnTextActive]}>
+                      📲 내 이메일로 받아보기
                     </Text>
                   </TouchableOpacity>
                   <TouchableOpacity
@@ -837,6 +963,20 @@ export default function ProfileScreen() {
                   ))}
                 </View>
 
+                {claimMethod === 'email' && (
+                  <View style={{ marginTop: 14 }}>
+                    <Text style={styles.formTitle}>📧 수신 이메일 주소 입력</Text>
+                    <TextInput
+                      style={styles.inputField}
+                      value={claimEmail}
+                      onChangeText={setClaimEmail}
+                      placeholder="example@email.com"
+                      keyboardType="email-address"
+                      autoCapitalize="none"
+                    />
+                  </View>
+                )}
+
                 {claimMethod === 'fax' && (
                   <View style={{ marginTop: 14 }}>
                     <Text style={styles.formTitle}>📠 전송 팩스 번호 입력</Text>
@@ -849,25 +989,6 @@ export default function ProfileScreen() {
                     />
                   </View>
                 )}
-
-                <View style={{ backgroundColor: '#F9FAFA', borderRadius: 14, padding: 12, marginTop: 16, borderWidth: 1, borderColor: '#EEE' }}>
-                  <Text style={{ fontSize: 11, color: '#666', lineHeight: 16 }}>
-                    ℹ️ **안내 사항**{'\n'}
-                    - 비대면 진료 처방 조제 영수증 및 청구 서류 작성이 자동으로 시뮬레이션 처리됩니다.
-                    - 팩스 전송은 가상 모의 팩스 게이트웨이를 사용하여 전송이 모사됩니다.
-                  </Text>
-                </View>
-
-                <TouchableOpacity
-                  style={[styles.claimSubmitBtn, (!selectedRecordId || (claimMethod === 'fax' && !claimFaxNo)) && { backgroundColor: '#CCC' }]}
-                  disabled={!selectedRecordId || (claimMethod === 'fax' && !claimFaxNo)}
-                  onPress={handleStartClaim}
-                  activeOpacity={0.85}
-                >
-                  <Text style={styles.claimSubmitBtnText}>의료서류 자동 청구 및 팩스발송</Text>
-                </TouchableOpacity>
-              </ScrollView>
-            )}
 
             {claimStep === 'loading' && (
               <View style={styles.claimLoadingContainer}>
@@ -911,31 +1032,51 @@ export default function ProfileScreen() {
               </TouchableOpacity>
             </View>
             <ScrollView style={styles.modalScroll} contentContainerStyle={styles.modalScrollContent}>
-              {orders.map((ord) => (
-                <TouchableOpacity
-                  key={ord.id}
-                  style={styles.orderCard}
-                  onPress={() => handleOrderPress(ord.productId)}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.orderHeader}>
-                    <Text style={styles.orderNo}>주문번호: {ord.id} (클릭 시 상품 페이지로 이동)</Text>
-                    <Text style={[
-                      styles.orderStatus,
-                      { color: ord.status === '배송중' ? '#FF9800' : '#4CAF82' }
-                    ]}>
-                      {ord.status}
-                    </Text>
-                  </View>
-                  <Text style={styles.orderItemName}>{ord.name}</Text>
-                  <Text style={styles.orderPrice}>결제 금액: {ord.price}원</Text>
-                  <Text style={styles.orderDate}>주문 일자: {ord.date}</Text>
-                </TouchableOpacity>
-              ))}
+              {ordersLoading ? (
+                <View style={{ alignItems: 'center', paddingVertical: 60 }}>
+                  <ActivityIndicator size="large" color="#4CAF82" />
+                  <Text style={{ fontSize: 13, color: '#999', marginTop: 12 }}>주문 내역 불러오는 중...</Text>
+                </View>
+              ) : orders.length === 0 ? (
+                <View style={{ alignItems: 'center', paddingVertical: 80 }}>
+                  <Ionicons name="bag-outline" size={48} color="#DDD" />
+                  <Text style={{ fontSize: 13, color: '#999', marginTop: 12 }}>아직 주문 내역이 없습니다.</Text>
+                  <TouchableOpacity
+                    onPress={() => { setActiveModal('none'); router.push('/(tabs)/shop'); }}
+                    style={{ marginTop: 16, backgroundColor: '#4CAF82', paddingHorizontal: 24, paddingVertical: 10, borderRadius: 20 }}
+                  >
+                    <Text style={{ color: '#fff', fontWeight: '700', fontSize: 13 }}>스토어 바로가기</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                orders.map((ord) => {
+                  const firstItem = Array.isArray(ord.items) && ord.items.length > 0 ? ord.items[0] : null;
+                  const itemCount = Array.isArray(ord.items) ? ord.items.length : 0;
+                  const statusColor = ord.status === 'paid' ? '#4CAF82' : ord.status === 'pending' ? '#FF9800' : '#9E9E9E';
+                  const statusLabel = ord.status === 'paid' ? '결제완료' : ord.status === 'pending' ? '결제대기' : ord.status;
+                  return (
+                    <View key={ord.id} style={styles.orderCard}>
+                      <View style={styles.orderHeader}>
+                        <Text style={styles.orderNo}>주문 #{ord.id}</Text>
+                        <Text style={[styles.orderStatus, { color: statusColor }]}>{statusLabel}</Text>
+                      </View>
+                      <Text style={styles.orderItemName}>
+                        {firstItem ? firstItem.name : '상품 정보 없음'}
+                        {itemCount > 1 ? ` 외 ${itemCount - 1}건` : ''}
+                      </Text>
+                      <Text style={styles.orderPrice}>결제 금액: {ord.total?.toLocaleString()}원</Text>
+                      <Text style={styles.orderDate}>
+                        주문 일자: {ord.createdAt ? new Date(ord.createdAt).toLocaleDateString('ko-KR') : ''}
+                      </Text>
+                    </View>
+                  );
+                })
+              )}
             </ScrollView>
           </View>
         </View>
       </Modal>
+
 
       {/* ======================================================== */}
       {/* 5. 간편 결제 카드 등록 모달 */}
