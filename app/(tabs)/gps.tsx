@@ -15,6 +15,7 @@ import { createAudioPlayer, AudioModule } from 'expo-audio'; // expo-av deprecat
 import { useGpsStore } from '../../store/useGpsStore';
 import { useNotificationStore } from '../../store/useNotificationStore';
 import { styles } from '../../styles/gps.styles';
+import { triggerInstantNotification } from '../../utils/notificationHelper';
 
 let WebView: any = null;
 if (Platform.OS !== 'web') {
@@ -355,6 +356,10 @@ export default function GpsScreen() {
           clearInterval(countdownIntervalRef.current);
           countdownIntervalRef.current = null;
           startSirenSound();
+          triggerInstantNotification(
+            '🚨 SOS 긴급 호출 감지',
+            '[비상] 보호 대상자의 휴대폰에서 SOS 비상 싸이렌이 작동했습니다. 즉시 신변을 파악하십시오.'
+          );
           useNotificationStore.getState().addNotification({
             title: '🚨 SOS 긴급 호출 감지',
             body: `[비상] 보호 대상자의 휴대폰에서 SOS 비상 싸이렌이 작동했습니다. 즉시 신변을 파악하십시오.`,
@@ -499,7 +504,18 @@ export default function GpsScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.simBtn, isOutOfBoundsSimulated && styles.simBtnActiveRed]}
-              onPress={() => setIsOutOfBoundsSimulated(true)}
+              onPress={() => {
+                setIsOutOfBoundsSimulated(true);
+                triggerInstantNotification(
+                  '📍 안전구역 이탈 감지',
+                  `보호 대상자가 지정 안전구역(반경 ${settings.safetyRadius}m)을 벗어났습니다.`
+                );
+                useNotificationStore.getState().addNotification({
+                  title: '📍 안전구역 이탈',
+                  body: `보호 대상자가 지정 안전구역(반경 ${settings.safetyRadius}m)을 벗어났습니다.`,
+                  type: 'gps',
+                });
+              }}
             >
               <Text style={[styles.simBtnText, isOutOfBoundsSimulated && styles.simBtnTextActive]}>
                 영역 이탈 (알람 테스트)

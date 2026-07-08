@@ -18,6 +18,8 @@ import { useSymptomStore, getSymptomsForPart, RED_FLAGS } from '../../store/symp
 import { useNotificationStore } from '../../store/useNotificationStore';
 import HumanBody from '../../components/HumanBody';
 import { styles } from '../../styles/index.styles';
+import { api } from '../../services/api';
+import { Ionicons } from '@expo/vector-icons';
 
 const GREETING = '안녕하세요';
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
@@ -57,6 +59,48 @@ export default function HomeScreen() {
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  // 📍 안심 GPS 피보호자 대기 상태 연동 요청 상태
+  const [pendingGpsRequests, setPendingGpsRequests] = useState<any[]>([]);
+  const [currentGpsRequest, setCurrentGpsRequest] = useState<any | null>(null);
+
+  const fetchPendingGpsRequests = async () => {
+    try {
+      const data = await api.get('/api/gps/pending-requests');
+      if (data && data.length > 0) {
+        setPendingGpsRequests(data);
+        setCurrentGpsRequest(data[0]); // 첫 번째 요청 모달 연동
+      }
+    } catch (e) {
+      console.warn('보호 동의 대기 요청 조회 실패:', e);
+    }
+  };
+
+  useEffect(() => {
+    fetchPendingGpsRequests();
+  }, []);
+
+  const handleAcceptGpsRequest = async (id: number) => {
+    try {
+      await api.post(`/api/gps/accept-request/${id}`);
+      Alert.alert('연동 완료', '보호자 안심 연동 수락이 완료되었습니다.');
+      setPendingGpsRequests(prev => prev.filter(r => r.id !== id));
+      setCurrentGpsRequest(null);
+    } catch (e) {
+      Alert.alert('수락 실패', '요청 수락 중 에러가 발생했습니다.');
+    }
+  };
+
+  const handleRejectGpsRequest = async (id: number) => {
+    try {
+      await api.post(`/api/gps/reject-request/${id}`);
+      Alert.alert('거절 완료', '보호 연동 요청을 거절하였습니다.');
+      setPendingGpsRequests(prev => prev.filter(r => r.id !== id));
+      setCurrentGpsRequest(null);
+    } catch (e) {
+      Alert.alert('거절 실패', '요청 거절 중 에러가 발생했습니다.');
+    }
+  };
 
   // Intro animation states
   const greetingOpacity = useRef(new Animated.Value(0)).current;
@@ -695,6 +739,41 @@ export default function HomeScreen() {
                 }}
               >
                 <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 13 }}>✅ 상태 양호 (진단)</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── 📍 안심 GPS 피보호자 동의 팝업 모달 ── */}
+      <Modal visible={!!currentGpsRequest} transparent animationType="fade">
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}>
+          <View style={{ padding: 24, borderRadius: 28, width: '85%', alignSelf: 'center', backgroundColor: '#FFF' }}>
+            <View style={{ alignItems: 'center', marginBottom: 16 }}>
+              <View style={{ width: 64, height: 64, borderRadius: 32, backgroundColor: '#E8F5E9', alignItems: 'center', justifyContent: 'center', marginBottom: 12 }}>
+                <Ionicons name="location" size={32} color="#4CAF82" />
+              </View>
+              <Text style={{ fontSize: 18, fontWeight: '800', color: '#1A1A1A' }}>📍 안심 GPS 연동 동의</Text>
+            </View>
+
+            <Text style={{ fontSize: 13, color: '#444', textAlign: 'center', lineHeight: 20, marginBottom: 20 }}>
+              보호자 <Text style={{ fontWeight: '700', color: '#4CAF82' }}>{currentGpsRequest?.guardian?.name}님</Text>이{"\n"}
+              회원님을 <Text style={{ fontWeight: '700' }}>[보호 대상자]</Text>로 등록하여 실시간 위치 정보 및 SOS 안전 지연 관리를 연동하고자 합니다.{"\n\n"}
+              보호 연동에 동의하여 위치 공유 및 긴급 상황 호출 권한을 제공하시겠습니까?
+            </Text>
+
+            <View style={{ flexDirection: 'row', gap: 10 }}>
+              <TouchableOpacity
+                style={{ flex: 1, backgroundColor: '#F5F5F5', borderRadius: 16, paddingVertical: 14, alignItems: 'center' }}
+                onPress={() => handleRejectGpsRequest(currentGpsRequest.id)}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#666' }}>거절</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={{ flex: 1, backgroundColor: '#4CAF82', borderRadius: 16, paddingVertical: 14, alignItems: 'center' }}
+                onPress={() => handleAcceptGpsRequest(currentGpsRequest.id)}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFF' }}>동의(수락)</Text>
               </TouchableOpacity>
             </View>
           </View>

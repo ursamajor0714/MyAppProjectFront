@@ -1,10 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   TextInput,
   ScrollView,
   TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -13,15 +14,62 @@ import { useCartStore } from '../../../store/useCartStore';
 import { useNotificationStore } from '../../../store/useNotificationStore';
 import { SYMPTOM_CATEGORIES, TYPE_TAGS, PRODUCTS } from '../../../constants/shopData';
 import { styles } from './_shop.styles';
+import * as SecureStore from 'expo-secure-store';
+
+const SERVER = 'http://192.168.0.100:3000';
+
+const getToken = async () => {
+  try {
+    let token = await SecureStore.getItemAsync('userToken');
+    if (!token && typeof localStorage !== 'undefined') token = localStorage.getItem('userToken');
+    return token;
+  } catch { return null; }
+};
+
+const CATEGORY_LABEL_MAP: Record<string, string> = {
+  fatigue: '피로회복', immunity: '면역강화', digestion: '소화건강',
+  joint: '관절건강', sleep: '수면개선', eye: '눈건강',
+  skin: '피부', circulation: '혈액순환', memory: '기억력', women: '여성건강', men: '남성건강'
+};
+
 
 export default function ShopScreen() {
   const [searchText, setSearchText] = useState('');
   const [selectedMainCategory, setSelectedMainCategory] = useState<'all' | 'supplement' | 'medical'>('all');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  const [illnessRec, setIllnessRec] = useState<{
+    recommendedCategories: string[];
+    recommendedTypes: string[];
+    illnesses: string[];
+    reason: string;
+  } | null>(null);
+  const [recLoading, setRecLoading] = useState(true);
 
   const { fromDiagnosis, part, hasWound } = useLocalSearchParams<{ fromDiagnosis?: string; part?: string; hasWound?: string }>();
   const navigation = useNavigation();
+
+  // ── 서버에서 기저질환 기반 추천 데이터 fetch ──
+  const fetchIllnessRecommend = useCallback(async () => {
+    try {
+      const token = await getToken();
+      if (!token) { setRecLoading(false); return; }
+      const res = await fetch(`${SERVER}/api/shop/recommend`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (!res.ok) { setRecLoading(false); return; }
+      const data = await res.json();
+      setIllnessRec(data);
+    } catch (e) {
+      console.warn('기저질환 추천 fetch 실패:', e);
+    } finally {
+      setRecLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchIllnessRecommend();
+  }, [fetchIllnessRecommend]);
 
   useEffect(() => {
     if (fromDiagnosis === 'true') {
@@ -116,7 +164,27 @@ export default function ShopScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigation, totalCartCount, unreadCount]);
 
-  // 최근 자가진단 연동 추천 필터
+  // ── 기저질환 기반 서버 추천 상품 목록 (API 응답 활용) ──
+  const illnessRecommendedProducts = (() => {
+    if (!illnessRec || illnessRec.illnesses.length === 0) return [];
+    const { recommendedCategories, recommendedTypes } = illnessRec;
+    return PRODUCTS
+      .filter(p =>
+        p.mainCategory === 'supplement' &&
+        (recommendedCategories.includes(p.category) || recommendedTypes.includes(p.type))
+      )
+      .sort((a, b) => {
+        // 카테고리 우선순위 가중치 정렬
+        const aScore = (recommendedCategories.indexOf(a.category) !== -1 ? 3 : 0)
+          + (recommendedTypes.indexOf(a.type) !== -1 ? 1 : 0);
+        const bScore = (recommendedCategories.indexOf(b.category) !== -1 ? 3 : 0)
+          + (recommendedTypes.indexOf(b.type) !== -1 ? 1 : 0);
+        return bScore - aScore;
+      })
+      .slice(0, 8);
+  })();
+
+  // ── 최근 자가진단 연동 추천 필터 (Zustand 오프라인) ──
   const recommendedProducts = (() => {
     if (!latestDiagnosis) return [];
     const symptoms = latestDiagnosis.symptoms || [];
@@ -289,8 +357,75 @@ export default function ShopScreen() {
         contentContainerStyle={styles.listContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* ── 기저질환 맞춤 추천 섹션 (서버 API 연동) ── */}
+        {!recLoading && illnessRec && illnessRec.illnesses.length > 0 && illnessRecommendedProducts.length > 0 && (
+          <View style={[styles.recommendSection, { borderLeftColor: '#1976D2', borderLeftWidth: 3, paddingLeft: 12 }]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+              <Text style={{ fontSize: 18, marginRight: 6 }}>🏥</Text>
+              <Text style={[styles.recommendTitle, { color: '#1565C0', flex: 1 }]}>
+                기저질환 맞춤 추천
+              </Text>
+            </View>
+            <Text style={{ fontSize: 12, color: '#555', marginBottom: 10 }}>
+              {illnessRec.reason}
+            </Text>
+            {/* 추천 카테고리 칩 */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={{ marginBottom: 10 }}
+            >
+              {illnessRec.recommendedCategories.map(cat => (
+                <TouchableOpacity
+                  key={cat}
+                  onPress={() => {
+                    setSelectedMainCategory('supplement');
+                    setSelectedCategory(cat);
+                  }}
+                  style={{
+                    backgroundColor: selectedCategory === cat ? '#1976D2' : '#E3F2FD',
+                    borderRadius: 20,
+                    paddingHorizontal: 14,
+                    paddingVertical: 6,
+                    marginRight: 8,
+                  }}
+                >
+                  <Text style={{ color: selectedCategory === cat ? '#fff' : '#1976D2', fontWeight: '700', fontSize: 12 }}>
+                    {CATEGORY_LABEL_MAP[cat] || cat}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            {/* 추천 상품 가로 스크롤 */}
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recommendScroll}>
+              {illnessRecommendedProducts.map(p => (
+                <TouchableOpacity
+                  key={`ill-rec-${p.id}`}
+                  style={styles.recommendCard}
+                  onPress={() => handleProductPress(p.id)}
+                  activeOpacity={0.9}
+                >
+                  <View style={[styles.recommendImg, { backgroundColor: p.color }]}>
+                    <Text style={styles.recommendImgText}>{p.type}</Text>
+                  </View>
+                  <Text style={styles.recommendName} numberOfLines={1}>{p.name}</Text>
+                  <Text style={styles.recommendPrice}>{p.price.toLocaleString()}원</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        )}
+
+        {recLoading && (
+          <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+            <ActivityIndicator size="small" color="#1976D2" />
+            <Text style={{ fontSize: 12, color: '#999', marginTop: 4 }}>기저질환 분석 중...</Text>
+          </View>
+        )}
+
         {/* 최근 자가진단 맞춤 추천 섹션 (DB 없이 오프라인 Zustand 기반 연동) */}
         {latestDiagnosis && recommendedProducts.length > 0 && (
+
           <View style={styles.recommendSection}>
             <Text style={styles.recommendTitle}>
               💡 최근 {latestDiagnosis.partLabel} 자가진단 맞춤 추천 상품

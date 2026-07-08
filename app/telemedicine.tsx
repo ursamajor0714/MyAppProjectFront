@@ -9,8 +9,11 @@ import {
   Dimensions,
   Platform,
   Alert,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useAuthStore } from '../store/useAuthStore';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as SecureStore from '../utils/secureStoreHelper';
@@ -40,6 +43,70 @@ export default function TelemedicineScreen() {
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null);
   const [waitingNumber, setWaitingNumber] = useState(3);
   const [waitingTime, setWaitingTime] = useState(8);
+
+  const { user } = useAuthStore();
+
+  // 처방전 약국 발송 관련 상태
+  const [isPrescriptionModalOpen, setIsPrescriptionModalOpen] = useState(false);
+  const [prescriptionMethod, setPrescriptionMethod] = useState<'fax' | 'email'>('fax');
+  const [pharmacyName, setPharmacyName] = useState('');
+  const [pharmacyFaxNo, setPharmacyFaxNo] = useState('');
+  const [pharmacyEmailAddr, setPharmacyEmailAddr] = useState('');
+  const [isPrescriptionSending, setIsPrescriptionSending] = useState(false);
+
+  const handleSendPrescription = async () => {
+    if (!pharmacyName.trim()) {
+      Alert.alert('입력 요망', '처방전을 전달받을 약국 이름을 정확히 기입해 주세요.');
+      return;
+    }
+    if (prescriptionMethod === 'fax' && !pharmacyFaxNo.trim()) {
+      Alert.alert('입력 요망', '약국의 팩스 번호를 기입해 주세요.');
+      return;
+    }
+    if (prescriptionMethod === 'email' && !pharmacyEmailAddr.trim()) {
+      Alert.alert('입력 요망', '약국의 이메일 주소를 기입해 주세요.');
+      return;
+    }
+
+    setIsPrescriptionSending(true);
+
+    try {
+      if (prescriptionMethod === 'fax') {
+        await api.post('/api/documents/send-fax', {
+          faxNumber: pharmacyFaxNo.trim(),
+        });
+        Alert.alert('처방전 송출 성공', `[${pharmacyName}] 약국으로 가상 처방전 팩스(FAX) 전송이 완료되었습니다.`);
+      } else {
+        await api.post('/api/documents/send-email', {
+          email: pharmacyEmailAddr.trim(),
+          subject: `[건강체크 케어서비스] 비대면 처방 조제 요청 (${user?.name || '환자'})`,
+          content: `안녕하세요, 건강체크 서비스입니다.
+비대면 진료가 완료되어 환자(${user?.name || '환자'})님이 요청하신 처방 서류를 송부합니다.
+
+[진료 상세 및 약국 제출용]
+- 환자 이름: ${user?.name || '환자'}
+- 담당 전문의: ${selectedDoctor?.name || '전문의'}
+- 진료 병원: ${selectedHospital?.name || '지정병원'}
+- 수신 약국: ${pharmacyName}
+
+환자가 귀 약국에 방문 예정이오니, 처방 조제 가능 여부를 사전에 검토 및 회신 부탁드립니다.
+감사합니다.`,
+        });
+        Alert.alert('처방전 송출 성공', `[${pharmacyName}] 약국으로 가상 처방전 이메일(Email) 전송이 완료되었습니다.`);
+      }
+
+      // 모달 닫기 및 초기화 후 메인 이동
+      setIsPrescriptionModalOpen(false);
+      cleanupMediaAndSocket();
+      setStep('hospital');
+      setSelectedDoctor(null);
+      setSelectedHospital(null);
+    } catch (e: any) {
+      Alert.alert('송신 실패', e.message || '처방전 발송 도중 오류가 발생했습니다.');
+    } finally {
+      setIsPrescriptionSending(false);
+    }
+  };
 
   // WebRTC 및 실시간 소켓 상태
   const [sessionId, setSessionId] = useState<number | null>(null);
@@ -93,8 +160,8 @@ export default function TelemedicineScreen() {
     return () => clearInterval(timer);
   }, [step, isCallActive]);
 
-  // 로컬 미디어 (카메라 & 마이크) 스트림 시작
-  const startLocalStream = async () => {
+  // 로컬 미디어 (카메라 & 마이크) 스트림 시작 - 실패해도 진료 접수는 계속 진행
+  const startLocalStream = async (): Promise<any | null> => {
     try {
       const stream = await mediaDevices.getUserMedia({
         audio: true,
@@ -108,8 +175,8 @@ export default function TelemedicineScreen() {
       localStreamRef.current = stream;
       return stream;
     } catch (error) {
-      console.error('로컬 카메라/마이크 캡처 실패:', error);
-      Alert.alert('권한 오류', '화상 진료를 위한 카메라/마이크 캡처 권한을 획득하지 못했습니다. 설정에서 확인해 주세요.');
+      // 카메라/마이크 없어도 텍스트 기반 진료(시그널링)는 계속 진행
+      console.warn('⚠️ 로컬 카메라/마이크 캡처 실패 (미디어 없이 계속 진행):', error);
       return null;
     }
   };
@@ -179,12 +246,10 @@ export default function TelemedicineScreen() {
   const startClinicSession = async (doctor: Doctor) => {
     if (!selectedHospital) return;
 
-    // [iOS/모바일 브라우저 대응] 사용자 클릭 이벤트 내부에서 미리 카메라/마이크 권한을 획득하여 홀딩합니다.
-    // 비동기 소켓 콜백 안에서 getUserMedia를 호출하면 브라우저 보안 정책(Safari 등)에 의해 차단될 수 있습니다.
+    // [iOS/모바일 브라우저 대응] 사용자 클릭 이벤트 내부에서 미리 카메라/마이크 권한을 획득합니다.
+    // 실패해도 오디오/비디오 없이 시그널링 진료 진행 (카메라/마이크 없는 환경 지원)
     const preStream = await startLocalStream();
-    if (!preStream) {
-      return; // 권한 획득 실패 시 접수를 진행하지 않음
-    }
+    // 스트림 실패해도 진료 접수는 계속 진행 (preStream이 null일 수 있음)
 
     try {
       // 1. 백엔드 DB 세션 접수 생성
@@ -205,7 +270,11 @@ export default function TelemedicineScreen() {
       const token = await SecureStore.getItemAsync('auth_token');
       const socket = io(API_URL, {
         auth: { token },
-        transports: ['websocket']
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1500,
+        timeout: 10000,
       });
 
       socketRef.current = socket;
@@ -215,14 +284,13 @@ export default function TelemedicineScreen() {
         socket.emit('join-clinic', { sessionId: session.id });
       });
 
-      // 의사 접속 완료 -> WebRTC 셋업
+      // 의사 접속 완료 -> WebRTC 셋업 (스트림 없어도 PeerConnection 생성)
       socket.on('clinic-ready', async () => {
         console.log('의사 입장 감지 ➡️ WebRTC 연결 개시');
         const stream = localStreamRef.current || await startLocalStream();
-        if (stream) {
-          const pc = await setupPeerConnection(stream);
-          await createAndSendOffer(pc);
-        }
+        // 스트림이 없어도(null) PeerConnection은 생성하여 시그널링 진행
+        const pc = await setupPeerConnection(stream);
+        await createAndSendOffer(pc);
       });
 
       // 의사로부터의 Offer 처리
@@ -258,14 +326,14 @@ export default function TelemedicineScreen() {
         }
       });
 
-      // ICE Candidate 중계 수신
+      // ICE Candidate 중계 수신 (null 체크 강화)
       socket.on('ice-candidate', async ({ candidate }: any) => {
         const pc = peerConnectionRef.current;
-        if (pc) {
+        if (pc && candidate) {
           try {
             await pc.addIceCandidate(new RTCIceCandidate(candidate));
           } catch (e) {
-            console.warn('Candidate 추가 실패:', e);
+            console.warn('Candidate 추가 실패 (무시):', e);
           }
         }
       });
@@ -288,6 +356,63 @@ export default function TelemedicineScreen() {
     }
   };
 
+  // 통화 중 진료 종료 (isCallActive 상태에서 끊기 버튼)
+  const handleEndCall = () => {
+    Alert.alert(
+      '진료 종료',
+      '비대면 진료를 종료하시겠습니까?',
+      [
+        { text: '아니오', style: 'cancel' },
+        {
+          text: '종료',
+          style: 'destructive',
+          onPress: async () => {
+            if (sessionId) {
+              try {
+                await api.put(`/api/telemedicine/sessions/${sessionId}`, { status: 'completed' });
+                // 💳 등록 카드를 통한 자동 후청구 결제 실행
+                await api.post(`/api/telemedicine/sessions/${sessionId}/pay`);
+                
+                Alert.alert(
+                  '진료 및 수납 완료',
+                  '진료비 후청구 수납이 완료되었습니다. 처방전을 근처 약국으로 송부하시겠습니까?',
+                  [
+                    {
+                      text: '나중에 하기',
+                      onPress: () => {
+                        cleanupMediaAndSocket();
+                        setStep('hospital');
+                        setSelectedDoctor(null);
+                        setSelectedHospital(null);
+                      }
+                    },
+                    {
+                      text: '약국 발송 진행',
+                      onPress: () => {
+                        setIsPrescriptionModalOpen(true);
+                      }
+                    }
+                  ]
+                );
+              } catch (e) {
+                console.warn('서버 세션 완료 및 결제 실패:', e);
+                cleanupMediaAndSocket();
+                setStep('hospital');
+                setSelectedDoctor(null);
+                setSelectedHospital(null);
+              }
+            } else {
+              cleanupMediaAndSocket();
+              setStep('hospital');
+              setSelectedDoctor(null);
+              setSelectedHospital(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
   // 대기 중인 진료 취소 및 자원 해제
   const handleCancelWaiting = () => {
     Alert.alert(
@@ -308,8 +433,9 @@ export default function TelemedicineScreen() {
               }
             }
             cleanupMediaAndSocket();
-            setStep('doctor');
+            setStep('hospital');
             setSelectedDoctor(null);
+            setSelectedHospital(null);
           },
         },
       ]
@@ -430,7 +556,8 @@ export default function TelemedicineScreen() {
                 <Ionicons name={isVideoOff ? 'videocam-off' : 'videocam'} size={22} color={isVideoOff ? '#FFF' : '#333'} />
               </TouchableOpacity>
 
-              <TouchableOpacity style={[styles.controlBtn, styles.hangUpBtn]} onPress={handleCancelWaiting}>
+              {/* 끊기 버튼 - isCallActive 상태에서는 handleEndCall 전용 함수 호출 */}
+              <TouchableOpacity style={[styles.controlBtn, styles.hangUpBtn]} onPress={handleEndCall}>
                 <Ionicons name="call" size={22} color="#FFF" style={{ transform: [{ rotate: '135deg' }] }} />
               </TouchableOpacity>
             </View>
@@ -599,6 +726,97 @@ export default function TelemedicineScreen() {
           )}
         </View>
       )}
+
+      {/* ── 💊 처방전 약국 전송 모달 ── */}
+      <Modal visible={isPrescriptionModalOpen} transparent animationType="slide">
+        <View style={styles.telePrescOverlay}>
+          <View style={styles.telePrescContent}>
+            <View style={styles.telePrescHeader}>
+              <Text style={styles.telePrescTitle}>💊 약국 처방전 자동 발송</Text>
+              <TouchableOpacity onPress={() => {
+                setIsPrescriptionModalOpen(false);
+                cleanupMediaAndSocket();
+                setStep('hospital');
+                setSelectedDoctor(null);
+                setSelectedHospital(null);
+              }}>
+                <Ionicons name="close" size={24} color="#333" />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={{ maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+              <Text style={styles.telePrescDesc}>
+                발행된 원격 처방전을 수신할 근처 단골 약국 정보를 기입해 주세요. 해당 약국으로 처방 서류가 자동 송출됩니다.
+              </Text>
+
+              <Text style={styles.teleLabel}>1. 발송 방식 선택</Text>
+              <View style={styles.teleMethodGrid}>
+                <TouchableOpacity
+                  style={[styles.teleMethodBtn, prescriptionMethod === 'fax' && styles.teleMethodBtnActive]}
+                  onPress={() => setPrescriptionMethod('fax')}
+                >
+                  <Text style={[styles.teleMethodBtnText, prescriptionMethod === 'fax' && styles.teleMethodBtnTextActive]}>
+                    📠 팩스(FAX) 송출
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.teleMethodBtn, prescriptionMethod === 'email' && styles.teleMethodBtnActive]}
+                  onPress={() => setPrescriptionMethod('email')}
+                >
+                  <Text style={[styles.teleMethodBtnText, prescriptionMethod === 'email' && styles.teleMethodBtnTextActive]}>
+                    📧 이메일(Email) 송출
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.teleLabel}>2. 약국 이름</Text>
+              <TextInput
+                style={styles.teleInput}
+                placeholder="예: 푸른사랑약국"
+                value={pharmacyName}
+                onChangeText={setPharmacyName}
+              />
+
+              {prescriptionMethod === 'fax' ? (
+                <>
+                  <Text style={styles.teleLabel}>3. 약국 팩스 번호</Text>
+                  <TextInput
+                    style={styles.teleInput}
+                    placeholder="예: 02-1234-5678"
+                    keyboardType="numeric"
+                    value={pharmacyFaxNo}
+                    onChangeText={setPharmacyFaxNo}
+                  />
+                </>
+              ) : (
+                <>
+                  <Text style={styles.teleLabel}>3. 약국 수신 이메일</Text>
+                  <TextInput
+                    style={styles.teleInput}
+                    placeholder="예: pharmacy@naver.com"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    value={pharmacyEmailAddr}
+                    onChangeText={setPharmacyEmailAddr}
+                  />
+                </>
+              )}
+            </ScrollView>
+
+            <TouchableOpacity
+              style={[styles.teleSubmitBtn, isPrescriptionSending && { backgroundColor: '#A5D6A7' }]}
+              onPress={handleSendPrescription}
+              disabled={isPrescriptionSending}
+            >
+              {isPrescriptionSending ? (
+                <ActivityIndicator size="small" color="#FFF" />
+              ) : (
+                <Text style={styles.teleSubmitBtnText}>약국으로 처방 서류 송부</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1024,6 +1242,91 @@ const styles = StyleSheet.create({
   cancelBtnText: {
     color: '#EF4444',
     fontSize: 13,
+    fontWeight: '800',
+  },
+
+  // ── 처방전 모달 스타일 ──
+  telePrescOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'flex-end',
+  },
+  telePrescContent: {
+    backgroundColor: '#FFFFFF',
+    borderTopLeftRadius: 32,
+    borderTopRightRadius: 32,
+    padding: 24,
+    paddingBottom: 40,
+  },
+  telePrescHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  telePrescTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#1E293B',
+  },
+  telePrescDesc: {
+    fontSize: 12,
+    color: '#64748B',
+    lineHeight: 18,
+    marginBottom: 20,
+  },
+  teleLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#1E293B',
+    marginTop: 14,
+    marginBottom: 6,
+  },
+  teleMethodGrid: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 8,
+  },
+  teleMethodBtn: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  teleMethodBtnActive: {
+    borderColor: '#4F46E5',
+    backgroundColor: 'rgba(99, 102, 241, 0.06)',
+  },
+  teleMethodBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#64748B',
+  },
+  teleMethodBtnTextActive: {
+    color: '#4F46E5',
+  },
+  teleInput: {
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    padding: 12,
+    fontSize: 13,
+    color: '#1E293B',
+  },
+  teleSubmitBtn: {
+    backgroundColor: '#4CAF82',
+    borderRadius: 16,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginTop: 24,
+  },
+  teleSubmitBtnText: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '800',
   },
 });

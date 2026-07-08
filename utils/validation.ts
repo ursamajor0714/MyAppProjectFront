@@ -13,12 +13,14 @@ export const validatePassword = (password: string): boolean => {
   return password.length >= 6 && password.length <= 20;
 };
 
-// 휴대폰 번호 제약 조건: 010-XXXX-XXXX 형태 (대시 필수 혹은 숫자 11자리)
+// 휴대폰 번호 제약 조건: 숫자만 11자리 (01012345678) 형태 또는 대시 포함 형식
+// phone-pad 키보드에서 대시(-) 입력 불가능 이슈로 숫자만 형식을 기본으로 지원
 export const validatePhone = (phone: string): boolean => {
-  const phoneRegex = /^01[016789]-\d{3,4}-\d{4}$/;
-  // 대시 없는 순수 숫자 11자리 형식도 허용 (검증 시 대시 자동 삽입 혹은 검증 통과)
+  // 숫자만 10~11자리 형식 (01012345678, 0101234567)
   const pureDigitsRegex = /^01[016789]\d{7,8}$/;
-  return phoneRegex.test(phone) || pureDigitsRegex.test(phone);
+  // 레거시: 대시 포함 형식 (010-1234-5678) - 하위 호환성 유지
+  const phoneRegex = /^01[016789]-\d{3,4}-\d{4}$/;
+  return pureDigitsRegex.test(phone) || phoneRegex.test(phone);
 };
 
 // 이름 제약 조건: 한글 또는 영문만 허용, 2자 이상 15자 이하

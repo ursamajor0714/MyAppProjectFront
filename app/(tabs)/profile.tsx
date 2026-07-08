@@ -990,6 +990,16 @@ export default function ProfileScreen() {
                   </View>
                 )}
 
+                <TouchableOpacity
+                  style={[styles.gpsSaveBtn, { marginTop: 20, backgroundColor: '#2196F3' }]}
+                  onPress={handleStartClaim}
+                  activeOpacity={0.85}
+                >
+                  <Text style={styles.gpsSaveBtnText}>🧾 서류 발송 및 보험금 청구</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            )}
+
             {claimStep === 'loading' && (
               <View style={styles.claimLoadingContainer}>
                 <ActivityIndicator size="large" color="#4CAF82" />

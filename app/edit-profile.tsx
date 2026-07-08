@@ -155,11 +155,11 @@ import {
           <Field
             name="phone"
             label="전화번호"
-            placeholder="010-0000-0000"
+            placeholder="01000000000"
             keyboardType="phone-pad"
             rules={{
               required: '전화번호를 입력해주세요',
-              pattern: { value: /^01[016789]-\d{3,4}-\d{4}$/, message: '올바른 전화번호 형식(010-XXXX-XXXX)이 아닙니다' }
+              pattern: { value: /^01[016789]\d{7,8}$/, message: '올바른 전화번호 형식(01012345678)이 아닙니다' }
             }}
           />
   
