@@ -2,6 +2,11 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import { useAuthStore } from '../store/useAuthStore';
+import { LogBox, Platform } from 'react-native';
+
+if (Platform.OS === 'web') {
+  LogBox.ignoreAllLogs(true);
+}
 
 export default function RootLayout() {
   const loadFromStorage = useAuthStore(state => state.loadFromStorage);
