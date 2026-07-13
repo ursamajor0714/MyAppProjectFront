@@ -6,6 +6,11 @@ import { LogBox, Platform } from 'react-native';
 
 if (Platform.OS === 'web') {
   LogBox.ignoreAllLogs(true);
+  try {
+    // LogBox의 핵심 진입 메소드를 완전 모의(Mock)화하여 웹 2차 크래시 오버레이 방지
+    LogBox.install = () => {};
+    LogBox.uninstall = () => {};
+  } catch (e) {}
 }
 
 export default function RootLayout() {

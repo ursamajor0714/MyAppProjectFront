@@ -34,6 +34,23 @@ const { height: SCREEN_H } = Dimensions.get('window');
 type ClinicStep = 'hospital' | 'doctor' | 'waiting';
 
 export default function TelemedicineScreen() {
+  if (Platform.OS === ('web' as any)) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#F8FAFC', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <Text style={{ fontSize: 18, fontWeight: 'bold', color: '#1E293B', marginBottom: 10 }}>🏥 비대면 화상 진료실</Text>
+        <Text style={{ fontSize: 13, color: '#64748B', textAlign: 'center', marginBottom: 20, lineHeight: 18 }}>
+          비대면 화상 진료 기능은 모바일 앱(Expo Go / Native App) 환경에서만 작동합니다.
+        </Text>
+        <TouchableOpacity
+          style={{ backgroundColor: '#4CAF82', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 }}
+          onPress={() => router.back()}
+        >
+          <Text style={{ color: '#FFF', fontWeight: 'bold' }}>이전 화면으로 돌아가기</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
   const insets = useSafeAreaInsets();
   const { hospitalId, reportId, fromResult } = useLocalSearchParams<{ hospitalId?: string; reportId?: string; fromResult?: string }>();
   const [step, setStep] = useState<ClinicStep>('hospital');
@@ -514,7 +531,7 @@ export default function TelemedicineScreen() {
           // ── 통화 연결 중 ──
           <View style={styles.callWrapper}>
             {/* 상대방 (의사) 렌더링 - 전체 화면 */}
-            {Platform.OS === 'web' ? (
+            {Platform.OS === ('web' as any) ? (
               <video
                 ref={remoteVideoRef}
                 autoPlay
@@ -528,7 +545,7 @@ export default function TelemedicineScreen() {
             {/* 내 화면 (로컬) 렌더링 - 우측 상단 플로팅 미니어처 */}
             {!isVideoOff && (
               <View style={styles.floatingLocalView}>
-                {Platform.OS === 'web' ? (
+                {Platform.OS === ('web' as any) ? (
                   <video
                     ref={localVideoRef}
                     autoPlay
