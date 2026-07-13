@@ -174,6 +174,7 @@ export default function SymptomResultScreen() {
         ) : null}
 
 
+
         {/* ── 행동 이동 버튼 (비대면 연결 및 모든 증상 연동 지원) ── */}
         <View style={{ gap: 8, marginTop: 12, width: '100%' }}>
           <View style={{ flexDirection: 'row', gap: 8, width: '100%' }}>
@@ -194,11 +195,11 @@ export default function SymptomResultScreen() {
 
             <TouchableOpacity
               style={styles.actionBtnTertiary}
-              onPress={() => router.push({
+              onPress={() => router.replace({
                 pathname: '/telemedicine',
                 params: {
-                  reportId: record.id,
-                  fromResult: 'true'
+                  fromResult: 'true',
+                  reportId: record.id
                 }
               })}
               activeOpacity={0.85}

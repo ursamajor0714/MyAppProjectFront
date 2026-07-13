@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -6,36 +6,15 @@ import {
   ScrollView,
   TouchableOpacity,
   Alert,
-  Modal,
-  ActivityIndicator,
 } from 'react-native';
 import { router, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCartStore } from '../../../store/useCartStore';
-import { api } from '../../../services/api';
-import { triggerInstantNotification } from '../../../utils/notificationHelper';
-import { Ionicons } from '@expo/vector-icons';
-
-interface CreditCardItem {
-  id: number;
-  company: string;
-  number: string;
-  expiry: string;
-  color: string;
-}
 
 export default function CartScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { cart, removeFromCart, updateQuantity, clearCart } = useCartStore();
-
-  // 결제 카드 연동 상태
-  const [cards, setCards] = useState<CreditCardItem[]>([]);
-  const [selectedCardId, setSelectedCardId] = useState<number | null>(null);
-  
-  // 모달 및 결제 로딩 제어
-  const [isPayModalOpen, setIsPayModalOpen] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const totalPrice = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
@@ -61,90 +40,25 @@ export default function CartScreen() {
     });
   }, [navigation, cart.length]);
 
-  // 화면 진입 시 카드 목록 조회
-  useEffect(() => {
-    loadUserCards();
-  }, []);
-
-  const loadUserCards = async () => {
-    try {
-      const data = await api.get('/api/cards');
-      setCards(data);
-      if (data.length > 0) {
-        setSelectedCardId(data[0].id); // 기본 첫번째 카드 선택
-      }
-    } catch (e) {
-      console.warn('결제용 카드 조회 오류:', e);
-    }
-  };
-
-  // 구매 버튼 클릭 시 분기 처리
-  const handlePressCheckout = () => {
-    if (cards.length === 0) {
-      // 카드가 없으면 마이페이지 유도
-      Alert.alert(
-        '결제 수단 필요',
-        '간편결제 지갑에 등록된 카드가 없습니다. 마이페이지에서 카드를 연동해 주세요.',
-        [
-          { text: '취소', style: 'cancel' },
-          {
-            text: '카드 등록하러 가기',
-            onPress: () => {
-              router.push('/(tabs)/profile');
-            }
+  const handleCheckout = () => {
+    Alert.alert(
+      '주문 데모',
+      '결제 기능은 준비 중입니다. 장바구니를 비울까요?',
+      [
+        { text: '아니오', style: 'cancel' },
+        {
+          text: '예 (비우기)',
+          onPress: () => {
+            clearCart();
           }
-        ]
-      );
-      return;
-    }
-    // 카드가 있으면 카드 선택 모달 열기
-    setIsPayModalOpen(true);
-  };
-
-  // 실제 결제 요청 및 E2E 통보 처리
-  const handleConfirmCheckout = async () => {
-    if (!selectedCardId) return;
-    setIsSubmitting(true);
-
-    try {
-      const selectedCard = cards.find(c => c.id === selectedCardId);
-
-      // 백엔드 결제 API 전송 (PortOne 승인 연동)
-      const res = await api.post('/api/orders', {
-        items: cart.map(item => ({ id: item.id, name: item.name, quantity: item.quantity })),
-        cardId: selectedCardId,
-        amount: totalPrice,
-      });
-
-      // OS 즉시 상단 푸시 알람 전송
-      await triggerInstantNotification(
-        '🛒 결제 및 주문 성공',
-        `간편결제(${selectedCard?.company})로 ${totalPrice.toLocaleString()}원 결제가 승인되었습니다. (주문번호: ${res.orderId})`
-      );
-
-      Alert.alert(
-        '결제 완료',
-        `성공적으로 결제 및 주문 접수가 완료되었습니다.\n(결제 수단: ${selectedCard?.company})`,
-        [
-          {
-            text: '확인',
-            onPress: () => {
-              setIsPayModalOpen(false);
-              clearCart(); // 장바구니 비우기
-              router.replace('/(tabs)/shop'); // 상점으로 복귀
-            }
-          }
-        ]
-      );
-    } catch (e: any) {
-      Alert.alert('결제 오류', e.message || '결제를 완료하지 못했습니다.');
-    } finally {
-      setIsSubmitting(false);
-    }
+        }
+      ]
+    );
   };
 
   return (
     <View style={styles.container}>
+
       {cart.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Text style={styles.emptyIcon}>🛒</Text>
@@ -216,7 +130,7 @@ export default function CartScreen() {
 
             <TouchableOpacity
               style={styles.checkoutBtn}
-              onPress={handlePressCheckout}
+              onPress={handleCheckout}
               activeOpacity={0.85}
             >
               <Text style={styles.checkoutBtnText}>구매 진행하기</Text>
@@ -224,80 +138,34 @@ export default function CartScreen() {
           </View>
         </>
       )}
-
-      {/* ── 💳 간편 결제 카드 선택 모달 ── */}
-      <Modal visible={isPayModalOpen} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.payModalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>💳 간편 결제 카드 선택</Text>
-              <TouchableOpacity onPress={() => setIsPayModalOpen(false)}>
-                <Ionicons name="close" size={24} color="#333" />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.modalDesc}>결제에 사용할 간편결제 카드를 선택해 주세요.</Text>
-
-            <ScrollView style={styles.cardScroll} showsVerticalScrollIndicator={false}>
-              {cards.map((c) => {
-                const isSelected = selectedCardId === c.id;
-                return (
-                  <TouchableOpacity
-                    key={c.id}
-                    style={[
-                      styles.cardRadioItem,
-                      isSelected && styles.cardRadioItemActive,
-                      { borderLeftColor: c.color }
-                    ]}
-                    onPress={() => setSelectedCardId(c.id)}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.cardRadioLeft}>
-                      <View style={[styles.radioCircle, isSelected && styles.radioCircleActive]}>
-                        {isSelected && <View style={styles.radioInner} />}
-                      </View>
-                      <View style={{ marginLeft: 12 }}>
-                        <Text style={styles.cardCompanyText}>{c.company}</Text>
-                        <Text style={styles.cardNoText}>{c.number}</Text>
-                      </View>
-                    </View>
-                    <View style={[styles.cardMiniChip, { backgroundColor: c.color }]} />
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            <View style={styles.checkoutTotalRow}>
-              <Text style={styles.checkoutTotalLabel}>최종 결제 금액</Text>
-              <Text style={styles.checkoutTotalPrice}>{totalPrice.toLocaleString()}원</Text>
-            </View>
-
-            <TouchableOpacity
-              style={[styles.checkoutConfirmBtn, isSubmitting && { backgroundColor: '#A5D6A7' }]}
-              onPress={handleConfirmCheckout}
-              disabled={isSubmitting}
-              activeOpacity={0.85}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator size="small" color="#FFF" />
-              ) : (
-                <Text style={styles.checkoutConfirmBtnText}>등록된 카드로 결제 승인</Text>
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FAFAFA' },
+
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+    backgroundColor: '#FFFFFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  backBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  backBtnText: { fontSize: 20, color: '#333' },
+  headerTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A1A' },
+  clearBtn: { paddingVertical: 4, paddingHorizontal: 8 },
   clearHeaderBtn: { marginRight: 12, paddingVertical: 4, paddingHorizontal: 8 },
   clearBtnText: { fontSize: 13, color: '#FF5252', fontWeight: '700' },
   clearBtnDisabled: { color: '#CCC' },
+
   scroll: { flex: 1 },
   scrollContent: { padding: 16, gap: 12 },
+
   cartCard: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
@@ -313,6 +181,7 @@ const styles = StyleSheet.create({
   itemType: { fontSize: 10, color: '#4CAF82', fontWeight: '700', marginBottom: 2 },
   itemName: { fontSize: 13, fontWeight: '700', color: '#333', marginBottom: 4 },
   itemPrice: { fontSize: 14, fontWeight: '800', color: '#1A1A1A', marginBottom: 6 },
+
   controlRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   quantityWrap: {
     flexDirection: 'row',
@@ -326,12 +195,14 @@ const styles = StyleSheet.create({
   qtyValue: { width: 24, textAlign: 'center', fontSize: 12, fontWeight: '700', color: '#1A1A1A' },
   removeBtn: { paddingVertical: 4, paddingHorizontal: 8 },
   removeBtnText: { fontSize: 12, color: '#999', fontWeight: '600' },
+
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 },
   emptyIcon: { fontSize: 48, marginBottom: 16 },
   emptyText: { fontSize: 16, fontWeight: '700', color: '#333', marginBottom: 6 },
   emptySubText: { fontSize: 12, color: '#999', textAlign: 'center', lineHeight: 18, marginBottom: 20 },
   shopBtn: { backgroundColor: '#4CAF82', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 20 },
   shopBtnText: { fontSize: 13, fontWeight: '800', color: '#FFFFFF' },
+
   footerBar: {
     paddingHorizontal: 16,
     paddingTop: 16,
@@ -344,121 +215,4 @@ const styles = StyleSheet.create({
   priceTotal: { fontSize: 20, fontWeight: '900', color: '#E53935' },
   checkoutBtn: { backgroundColor: '#4CAF82', paddingVertical: 14, alignItems: 'center', borderRadius: 26 },
   checkoutBtnText: { fontSize: 15, fontWeight: '800', color: '#FFFFFF' },
-
-  // 결제 팝업 스타일
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'flex-end',
-  },
-  payModalContent: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
-    padding: 24,
-    maxHeight: '80%',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#1A1A1A',
-  },
-  modalDesc: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 20,
-  },
-  cardScroll: {
-    maxHeight: 250,
-    marginBottom: 20,
-  },
-  cardRadioItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#F9FAFA',
-    borderWidth: 1,
-    borderColor: '#EFEFEF',
-    borderLeftWidth: 5,
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 10,
-  },
-  cardRadioItemActive: {
-    borderColor: '#4CAF82',
-    backgroundColor: '#E8F5E9',
-  },
-  cardRadioLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  radioCircle: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    borderWidth: 2,
-    borderColor: '#CCC',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radioCircleActive: {
-    borderColor: '#4CAF82',
-  },
-  radioInner: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#4CAF82',
-  },
-  cardCompanyText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#333',
-  },
-  cardNoText: {
-    fontSize: 11,
-    color: '#777',
-    marginTop: 2,
-  },
-  cardMiniChip: {
-    width: 24,
-    height: 16,
-    borderRadius: 3,
-  },
-  checkoutTotalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#F2F2F2',
-    marginBottom: 16,
-  },
-  checkoutTotalLabel: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#444',
-  },
-  checkoutTotalPrice: {
-    fontSize: 22,
-    fontWeight: '900',
-    color: '#E53935',
-  },
-  checkoutConfirmBtn: {
-    backgroundColor: '#4CAF82',
-    borderRadius: 28,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  checkoutConfirmBtnText: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
 });

@@ -8,26 +8,25 @@ import {
   Modal,
   Alert,
   Platform,
+  Dimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
-import { createAudioPlayer, AudioModule } from 'expo-audio'; // expo-av deprecated → expo-audio 마이그레이션
+import { createAudioPlayer, AudioPlayer } from 'expo-audio'; // 모바일 오디오 재생 지원
 import { useGpsStore } from '../../store/useGpsStore';
 import { useNotificationStore } from '../../store/useNotificationStore';
 import { styles } from '../../styles/gps.styles';
-import { triggerInstantNotification } from '../../utils/notificationHelper';
 
 let WebView: any = null;
 if (Platform.OS !== 'web') {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     WebView = require('react-native-webview').WebView;
   } catch (e) {
     console.warn('react-native-webview load error:', e);
   }
 }
 
-
+const { width: SCREEN_W } = Dimensions.get('window');
 
 // ── 더미 질환 리스트 ──
 const ILLNESS_LIST = ['치매', '천식', '당뇨', '심장질환', '뇌질환'];
@@ -133,6 +132,7 @@ export default function GpsScreen() {
   const {
     settings,
     currentCoords,
+    isTracking,
     setConsent,
     updateSettings,
     setCurrentCoords,
@@ -155,7 +155,7 @@ export default function GpsScreen() {
   const sirenIntervalRef = useRef<any>(null);
   const countdownIntervalRef = useRef<any>(null);
   const iframeRef = useRef<any>(null);
-  const soundRef = useRef<any>(null); // 모바일 오디오 인스턴스 래퍼 추가
+  const soundRef = useRef<AudioPlayer | null>(null); // 모바일 오디오 인스턴스 래퍼 추가
 
   // 보호 대상자 연동 로직
   const handleLinkRequest = () => {
@@ -214,7 +214,7 @@ export default function GpsScreen() {
       setConsent(true);
       setPermissionError(null);
       fetchCurrentLocation();
-    } catch {
+    } catch (e) {
       setPermissionError('권한 요청 중 오류 발생');
       setConsent(false);
     }
@@ -297,14 +297,7 @@ export default function GpsScreen() {
 
     // 모바일 네이티브 (expo-audio) 재생 로직
     try {
-      AudioModule.setAudioModeAsync({
-        playsInSilentMode: true,
-        shouldRouteThroughEarpiece: false,
-      });
-
-      const player = createAudioPlayer(
-        { uri: 'https://assets.mixkit.co/active_storage/sfx/950/950-84.wav' }
-      );
+      const player = createAudioPlayer({ uri: 'https://assets.mixkit.co/active_storage/sfx/950/950-84.wav' });
       player.loop = true;
       player.volume = 1.0;
       player.play();
@@ -323,22 +316,22 @@ export default function GpsScreen() {
     if (oscRef.current) {
       try {
         oscRef.current.stop();
-      } catch {}
+      } catch (e) {}
       oscRef.current = null;
     }
     if (audioCtxRef.current) {
       try {
         audioCtxRef.current.close();
-      } catch {}
+      } catch (e) {}
       audioCtxRef.current = null;
     }
 
-    // 모바일 소리 정지 및 메모리 해제
+    // 모바일 소리 정지 및 메모리 언로드
     if (soundRef.current) {
       try {
         soundRef.current.pause();
         soundRef.current.remove();
-      } catch {}
+      } catch (e) {}
       soundRef.current = null;
     }
     setIsSirenPlaying(false);
@@ -356,10 +349,6 @@ export default function GpsScreen() {
           clearInterval(countdownIntervalRef.current);
           countdownIntervalRef.current = null;
           startSirenSound();
-          triggerInstantNotification(
-            '🚨 SOS 긴급 호출 감지',
-            '[비상] 보호 대상자의 휴대폰에서 SOS 비상 싸이렌이 작동했습니다. 즉시 신변을 파악하십시오.'
-          );
           useNotificationStore.getState().addNotification({
             title: '🚨 SOS 긴급 호출 감지',
             body: `[비상] 보호 대상자의 휴대폰에서 SOS 비상 싸이렌이 작동했습니다. 즉시 신변을 파악하십시오.`,
@@ -401,7 +390,6 @@ export default function GpsScreen() {
       stopSirenSound();
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 아동 연령 제한에 따른 안내 문구
@@ -504,18 +492,7 @@ export default function GpsScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.simBtn, isOutOfBoundsSimulated && styles.simBtnActiveRed]}
-              onPress={() => {
-                setIsOutOfBoundsSimulated(true);
-                triggerInstantNotification(
-                  '📍 안전구역 이탈 감지',
-                  `보호 대상자가 지정 안전구역(반경 ${settings.safetyRadius}m)을 벗어났습니다.`
-                );
-                useNotificationStore.getState().addNotification({
-                  title: '📍 안전구역 이탈',
-                  body: `보호 대상자가 지정 안전구역(반경 ${settings.safetyRadius}m)을 벗어났습니다.`,
-                  type: 'gps',
-                });
-              }}
+              onPress={() => setIsOutOfBoundsSimulated(true)}
             >
               <Text style={[styles.simBtnText, isOutOfBoundsSimulated && styles.simBtnTextActive]}>
                 영역 이탈 (알람 테스트)

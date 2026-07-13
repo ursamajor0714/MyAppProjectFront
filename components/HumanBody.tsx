@@ -1,4 +1,5 @@
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, StyleSheet, Pressable } from 'react-native';
+import { Text } from 'react-native';
 import Svg, { Circle, Rect, Line, G } from 'react-native-svg';
 
 type Props = {

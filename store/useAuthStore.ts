@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import * as SecureStore from '../utils/secureStoreHelper';
+import * as SecureStore from 'expo-secure-store';
 
 export interface UserInfo {
   id: string;
@@ -42,6 +42,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   logout: async () => {
     await SecureStore.deleteItemAsync(TOKEN_KEY);
     await SecureStore.deleteItemAsync(USER_KEY);
+    
+    // 비로그인 세션 원천 격리 (Zero Cache) - 동적 require로 순환 참조 해결
+    const { useNotificationStore } = require('./useNotificationStore');
+    const { useGpsStore } = require('./useGpsStore');
+    const { useCartStore } = require('./useCartStore');
+    const { useSymptomStore } = require('./symptomData');
+
+    useNotificationStore.getState().clearAll();
+    useGpsStore.getState().resetGpsStore();
+    useCartStore.getState().clearCart();
+    await useSymptomStore.getState().clearHistory();
     set({ isLoggedIn: false, user: null });
   },
 
@@ -59,6 +70,17 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const token = await SecureStore.getItemAsync(TOKEN_KEY);
       if (raw && token) {
         set({ isLoggedIn: true, user: JSON.parse(raw) });
+      } else {
+        // 비로그인 상태 진입 시 이전 캐시 원천 격리 (Zero Cache) - 동적 require
+        const { useNotificationStore } = require('./useNotificationStore');
+        const { useGpsStore } = require('./useGpsStore');
+        const { useCartStore } = require('./useCartStore');
+        const { useSymptomStore } = require('./symptomData');
+
+        useNotificationStore.getState().clearAll();
+        useGpsStore.getState().resetGpsStore();
+        useCartStore.getState().clearCart();
+        await useSymptomStore.getState().clearHistory();
       }
     } catch (_) {
     } finally {

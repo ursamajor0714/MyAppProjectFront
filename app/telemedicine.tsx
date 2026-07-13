@@ -442,6 +442,11 @@ export default function TelemedicineScreen() {
     );
   };
 
+  const handleMockAccept = () => {
+    console.log('🤖 Virtual WebRTC: 모의 수락 강제 트리거됨');
+    setIsCallActive(true);
+  };
+
   // 자원 초기화 청소기
   const cleanupMediaAndSocket = () => {
     if (localStreamRef.current) {
@@ -714,6 +719,14 @@ export default function TelemedicineScreen() {
                   차례가 오면 카메라와 통화 화면이 자동 연결됩니다. 화면을 켜둔 상태로 잠시만 기다려 주세요.
                 </Text>
               </View>
+
+              <TouchableOpacity
+                style={styles.mockAcceptBtn}
+                onPress={handleMockAccept}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.mockAcceptBtnText}>📞 의사 강제 통화 수락 (테스트용)</Text>
+              </TouchableOpacity>
 
               <TouchableOpacity
                 style={styles.cancelBtn}
@@ -1327,6 +1340,20 @@ const styles = StyleSheet.create({
   teleSubmitBtnText: {
     color: '#FFFFFF',
     fontSize: 14,
+    fontWeight: '800',
+  },
+  mockAcceptBtn: {
+    backgroundColor: '#00796B',
+    borderRadius: 16,
+    paddingVertical: 14,
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 10,
+    marginTop: 10,
+  },
+  mockAcceptBtnText: {
+    color: '#FFFFFF',
+    fontSize: 13,
     fontWeight: '800',
   },
 });

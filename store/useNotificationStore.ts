@@ -7,6 +7,7 @@ export interface NotificationItem {
   time: string;
   type: 'medication' | 'booking' | 'gps' | 'sos' | 'general';
   read: boolean;
+  relatedId?: string;
 }
 
 interface NotificationState {
@@ -15,6 +16,7 @@ interface NotificationState {
   setModalOpen: (open: boolean) => void;
   addNotification: (notification: Omit<NotificationItem, 'id' | 'read' | 'time'>) => void;
   markAllAsRead: () => void;
+  markAsRead: (id: string) => void;
   clearAll: () => void;
   deleteNotification: (id: string) => void;
   getUnreadCount: () => number;
@@ -79,6 +81,11 @@ export const useNotificationStore = create<NotificationState>((set, get) => ({
   markAllAsRead: () => {
     set((state) => ({
       notifications: state.notifications.map((n) => ({ ...n, read: true })),
+    }));
+  },
+  markAsRead: (id) => {
+    set((state) => ({
+      notifications: state.notifications.map((n) => n.id === id ? { ...n, read: true } : n),
     }));
   },
   clearAll: () => {

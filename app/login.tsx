@@ -10,10 +10,11 @@ import {
   TextInput,
   Alert,
 } from 'react-native';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, Controller, RegisterOptions } from 'react-hook-form';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuthStore } from '../store/useAuthStore';
 import { api } from '../services/api';
 
@@ -22,16 +23,25 @@ interface LoginForm {
   password: string;
 }
 
-
+type FieldProps = {
+  name: keyof LoginForm;
+  label: string;
+  placeholder: string;
+  rules?: RegisterOptions<LoginForm>;
+  keyboardType?: 'default' | 'email-address' | 'phone-pad' | 'number-pad';
+};
 
 export default function LoginScreen() {
   const insets = useSafeAreaInsets();
   const { login, isLoggedIn } = useAuthStore();
   const [showPassword, setShowPassword] = useState(false);
 
+  const [rememberEmail, setRememberEmail] = useState(false);
+
   const {
     control,
     handleSubmit,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<LoginForm>({
     defaultValues: { email: '', password: '' },
@@ -41,6 +51,21 @@ export default function LoginScreen() {
     if (isLoggedIn) router.replace('/profile');
   }, [isLoggedIn]);
 
+  useEffect(() => {
+    const loadRememberedEmail = async () => {
+      try {
+        const saved = await AsyncStorage.getItem('remembered_email');
+        if (saved) {
+          setValue('email', saved);
+          setRememberEmail(true);
+        }
+      } catch (e) {
+        console.warn('Failed to load remembered email:', e);
+      }
+    };
+    loadRememberedEmail();
+  }, []);
+
   const onSubmit = async (data: LoginForm) => {
     try {
       const resData = await api.post('/api/auth/login', {
@@ -49,6 +74,12 @@ export default function LoginScreen() {
       });
 
       const { token, user } = resData;
+
+      if (rememberEmail) {
+        await AsyncStorage.setItem('remembered_email', data.email);
+      } else {
+        await AsyncStorage.removeItem('remembered_email');
+      }
 
       await login(
         {
@@ -168,6 +199,22 @@ export default function LoginScreen() {
           {errors.password?.message && (
             <Text style={styles.errorText}>{errors.password.message}</Text>
           )}
+        </View>
+
+        {/* 아이디 기억하기 */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 20, paddingHorizontal: 4 }}>
+          <TouchableOpacity 
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
+            activeOpacity={0.8}
+            onPress={() => setRememberEmail(prev => !prev)}
+          >
+            <Ionicons 
+              name={rememberEmail ? 'checkbox' : 'square-outline'} 
+               size={20} 
+              color={rememberEmail ? '#4CAF82' : '#888'} 
+            />
+            <Text style={{ fontSize: 13, color: '#555', fontWeight: '600' }}>아이디 기억하기</Text>
+          </TouchableOpacity>
         </View>
 
         <TouchableOpacity

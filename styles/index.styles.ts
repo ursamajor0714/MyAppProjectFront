@@ -21,7 +21,6 @@ export const styles = StyleSheet.create({
   },
 
   hintRow: {
-    position: 'absolute', top: 16, zIndex: 5,
     flexDirection: 'row', alignItems: 'center', gap: 6,
     backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 8,
     borderRadius: 28, borderWidth: 1, borderColor: '#EAEAEA',

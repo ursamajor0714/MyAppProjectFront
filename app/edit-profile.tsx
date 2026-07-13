@@ -102,7 +102,13 @@ import {
               keyboardType={keyboardType}
               autoCapitalize="none"
               onBlur={onBlur}
-              onChangeText={onChange}
+              onChangeText={(text) => {
+                if (name === 'phone') {
+                  onChange(text.replace(/[^0-9]/g, ''));
+                } else {
+                  onChange(text);
+                }
+              }}
               value={value as string}
             />
           )}
@@ -155,11 +161,11 @@ import {
           <Field
             name="phone"
             label="전화번호"
-            placeholder="01000000000"
+            placeholder="예) 01012345678"
             keyboardType="phone-pad"
             rules={{
               required: '전화번호를 입력해주세요',
-              pattern: { value: /^01[016789]\d{7,8}$/, message: '올바른 전화번호 형식(01012345678)이 아닙니다' }
+              pattern: { value: /^01[016789]\d{7,8}$/, message: '올바른 전화번호 형식(10~11자리 숫자)이 아닙니다' }
             }}
           />
   

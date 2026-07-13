@@ -1,4 +1,4 @@
-import * as SecureStore from '../utils/secureStoreHelper';
+import * as SecureStore from 'expo-secure-store';
 import { API_URL } from '../constants/Api';
 
 const TOKEN_KEY = 'auth_token';
@@ -16,7 +16,7 @@ async function request(path: string, options: RequestInit = {}) {
     ...((options.headers as Record<string, string>) || {}),
   };
 
-  if (token) {
+  if (token && !headers['Authorization']) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
@@ -28,7 +28,7 @@ async function request(path: string, options: RequestInit = {}) {
   const resData = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    throw new Error(resData.error || `HTTP error! status: ${response.status}`);
+    throw new Error(resData.error || `HTTP error! status: ${response.status} at ${API_URL}${path}`);
   }
 
   return resData;

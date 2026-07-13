@@ -10,9 +10,11 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import { Alert } from 'react-native';
 import { useNotificationStore, NotificationItem } from '../store/useNotificationStore';
 
-const { height: SCREEN_H } = Dimensions.get('window');
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get('window');
 
 export default function NotificationModal() {
   const {
@@ -20,6 +22,7 @@ export default function NotificationModal() {
     setModalOpen,
     notifications,
     markAllAsRead,
+    markAsRead,
     clearAll,
     deleteNotification,
   } = useNotificationStore();
@@ -27,6 +30,53 @@ export default function NotificationModal() {
   const handleClose = () => {
     setModalOpen(false);
     markAllAsRead(); // Close marks all as read to clean up badges
+  };
+
+  const handleNotificationPress = (item: NotificationItem) => {
+    // 순환 참조 및 미초기화 평가 오류 방지를 위한 동적 require!
+    const { useAuthStore } = require('../store/useAuthStore');
+    const isLoggedIn = useAuthStore.getState().isLoggedIn;
+
+    if (!isLoggedIn) {
+      Alert.alert(
+        '회원가입 필요',
+        '상세 결과 조회 및 알림 맞춤 관리는 회원가입 후에 이용하실 수 있습니다. 회원가입 페이지로 이동하시겠습니까?',
+        [
+          { text: '취소', style: 'cancel' },
+          {
+            text: '회원가입',
+            onPress: () => {
+              setModalOpen(false);
+              router.push('/register');
+            }
+          }
+        ]
+      );
+      return;
+    }
+
+    // 개별 알림 읽음 및 목록에서 자동 제거 처리 반영
+    markAsRead(item.id);
+    deleteNotification(item.id);
+
+    setModalOpen(false);
+
+    // 관련 진단기록 ID가 지정되어 있는 경우 상세 결과서로 즉시 직행!
+    if (item.relatedId) {
+      router.push({
+        pathname: '/symptom-result',
+        params: { id: item.relatedId }
+      });
+      return;
+    }
+
+    if (item.type === 'gps' || item.type === 'sos') {
+      router.push('/gps');
+    } else if (item.type === 'booking') {
+      router.push('/clinic-hospitals');
+    } else if (item.type === 'medication') {
+      router.push('/profile');
+    }
   };
 
   const getIconAndColor = (type: NotificationItem['type']) => {
@@ -100,12 +150,14 @@ export default function NotificationModal() {
               notifications.map((item) => {
                 const config = getIconAndColor(item.type);
                 return (
-                  <View
+                  <TouchableOpacity
                     key={item.id}
                     style={[
                       styles.card,
                       !item.read && styles.unreadCard,
                     ]}
+                    activeOpacity={0.8}
+                    onPress={() => handleNotificationPress(item)}
                   >
                     {/* Icon Column */}
                     <View style={[styles.iconCircle, { backgroundColor: config.bg }]}>
@@ -132,7 +184,7 @@ export default function NotificationModal() {
                         <Ionicons name="close-circle-outline" size={18} color="#AAA" />
                       </TouchableOpacity>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 );
               })
             )}

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../services/api';
-import { useAuthStore } from './useAuthStore';
+
 
 export interface DiagnosisRecord {
   id: string;
@@ -564,6 +564,7 @@ interface SymptomState {
   resetCurrentDiagnosis: () => void;
   loadHistory: () => Promise<void>;
   saveDiagnosis: () => Promise<DiagnosisRecord>;
+  clearHistory: () => Promise<void>;
 }
 
 const HISTORY_STORAGE_KEY = 'diagnosis_history';
@@ -579,6 +580,11 @@ export const useSymptomStore = create<SymptomState>((set, get) => ({
     intensity: null,
   },
   history: [],
+
+  clearHistory: async () => {
+    set({ history: [] });
+    await AsyncStorage.removeItem(HISTORY_STORAGE_KEY);
+  },
 
   setPart: (part, label) => set((state) => ({
     currentDiagnosis: { ...state.currentDiagnosis, part, partLabel: label, symptoms: [] }
@@ -627,6 +633,7 @@ export const useSymptomStore = create<SymptomState>((set, get) => ({
       }
 
       // 로그인 세션이 있을 경우 서버 원격 진단 리포트 병합 로드
+      const { useAuthStore } = require('./useAuthStore');
       const isLoggedIn = useAuthStore.getState().isLoggedIn;
       if (isLoggedIn) {
         try {
@@ -750,6 +757,7 @@ export const useSymptomStore = create<SymptomState>((set, get) => ({
     await AsyncStorage.setItem(HISTORY_STORAGE_KEY, JSON.stringify(updatedHistory));
 
     // 로그인된 사용자의 경우 백엔드 서버에도 진단 결과 백업 업로드
+    const { useAuthStore } = require('./useAuthStore');
     const isLoggedIn = useAuthStore.getState().isLoggedIn;
     if (isLoggedIn) {
       try {

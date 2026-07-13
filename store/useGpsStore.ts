@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from '../services/api';
-import { useAuthStore } from './useAuthStore';
 
 export interface GpsSettings {
   id?: number;
@@ -29,6 +28,10 @@ interface GpsState {
   deleteSettingsFromServer: () => Promise<void>;
 }
 
+const getAuthStore = () => {
+  return require('./useAuthStore').useAuthStore;
+};
+
 const DEFAULT_SETTINGS: GpsSettings = {
   consentGranted: false,
   targetType: 'senior',
@@ -53,7 +56,7 @@ export const useGpsStore = create<GpsState>()(
         }));
         
         // 로그인된 상태라면 동기화 시도
-        const isLoggedIn = useAuthStore.getState().isLoggedIn;
+        const isLoggedIn = getAuthStore().getState().isLoggedIn;
         if (isLoggedIn) {
           const currentSettings = get().settings;
           try {
@@ -71,7 +74,7 @@ export const useGpsStore = create<GpsState>()(
           settings: { ...state.settings, ...updates },
         }));
 
-        const isLoggedIn = useAuthStore.getState().isLoggedIn;
+        const isLoggedIn = getAuthStore().getState().isLoggedIn;
         if (!isLoggedIn) return;
 
         const currentSettings = get().settings;
@@ -111,7 +114,7 @@ export const useGpsStore = create<GpsState>()(
         set({ currentCoords: coords });
 
         const currentSettings = get().settings;
-        const isLoggedIn = useAuthStore.getState().isLoggedIn;
+        const isLoggedIn = getAuthStore().getState().isLoggedIn;
         if (isLoggedIn && currentSettings.id && coords) {
           try {
             await api.put(`/api/gps/${currentSettings.id}`, {
@@ -129,7 +132,7 @@ export const useGpsStore = create<GpsState>()(
       resetGpsStore: () => set({ settings: DEFAULT_SETTINGS, currentCoords: null, isTracking: false }),
       
       fetchSettingsFromServer: async () => {
-        const isLoggedIn = useAuthStore.getState().isLoggedIn;
+        const isLoggedIn = getAuthStore().getState().isLoggedIn;
         if (!isLoggedIn) return;
         try {
           const data = await api.get('/api/gps');
@@ -159,7 +162,7 @@ export const useGpsStore = create<GpsState>()(
       
       deleteSettingsFromServer: async () => {
         const currentSettings = get().settings;
-        const isLoggedIn = useAuthStore.getState().isLoggedIn;
+        const isLoggedIn = getAuthStore().getState().isLoggedIn;
         if (isLoggedIn && currentSettings.id) {
           try {
             await api.delete(`/api/gps/${currentSettings.id}`);
