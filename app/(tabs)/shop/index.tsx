@@ -122,9 +122,12 @@ export default function ShopScreen() {
             };
           });
           setProducts(mapped);
+        } else {
+          setProducts(PRODUCTS);
         }
       } catch (err) {
-        console.warn('Failed to load shop products from server:', err);
+        console.warn('Failed to load shop products from server (falling back to local PRODUCTS):', err);
+        setProducts(PRODUCTS);
       }
     };
     fetchProducts();
