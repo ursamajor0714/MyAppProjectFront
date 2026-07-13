@@ -11,6 +11,15 @@ async function request(path: string, options: RequestInit = {}) {
     console.warn('SecureStore token read error:', e);
   }
 
+  // 1. 비로그인 상태에서의 무의미한 대기 딜레이 원천 격리 (Fast-Fail)
+  const isPublicPath = path.includes('/auth/login') || path.includes('/auth/register') || path.includes('/products');
+  if (!token && !isPublicPath) {
+    if (path.includes('/reports') || path.includes('/gps') || path.includes('/sessions')) {
+      return [];
+    }
+    return {};
+  }
+
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...((options.headers as Record<string, string>) || {}),
@@ -20,9 +29,9 @@ async function request(path: string, options: RequestInit = {}) {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  // 8초 타임아웃 경쟁 프로미스 생성
+  // 2. 타임아웃을 8초에서 2초로 파격 단축하여 사용자의 지연 체감을 0%로 제압 (2000ms)
   const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('REQUEST_TIMEOUT')), 8000)
+    setTimeout(() => reject(new Error('REQUEST_TIMEOUT')), 2000)
   );
 
   try {
@@ -44,12 +53,10 @@ async function request(path: string, options: RequestInit = {}) {
   } catch (err: any) {
     console.warn(`⚠️ API 호출 예외 감지 [Path: ${path}]:`, err.message || err);
 
-    // 타임아웃 또는 오프라인 장애 시 폰이 멈춰 서지 않도록 빈 구조(Fallback) 리턴
     if (path.includes('/reports') || path.includes('/gps') || path.includes('/sessions')) {
       return [];
     }
     if (path.includes('/products')) {
-      // 상품 조회의 경우 에러를 던져 호출측 shop/index.tsx 에서 PRODUCTS 상수로 폴백하게 함
       throw err;
     }
     return {};
