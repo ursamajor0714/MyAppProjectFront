@@ -27,6 +27,8 @@ import {
     gender?: 'male' | 'female';
     height: string;
     weight: string;
+    illnesses?: string;
+    medications?: string;
   }
 
   type FieldProps = {
@@ -56,6 +58,7 @@ const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
       defaultValues: {
         name: '', email: '', phone: '', password: '', passwordConfirm: '',
         age: '', height: '', weight: '',
+        illnesses: '', medications: '',
       },
     });
   
@@ -135,6 +138,47 @@ const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
             });
           } catch (profileErr) {
             console.warn('Profile update failed during register:', profileErr);
+          }
+        }
+
+        // 1. 기저질환 입력이 존재할 경우 가입과 동시에 백엔드 GPS/기저질환 테이블 자동 연동 적재
+        if (data.illnesses) {
+          try {
+            await api.post('/api/gps', {
+              targetType: 'senior',
+              targetAge: data.age ? Number(data.age) : 75,
+              safetyRadius: 300,
+              stayTimeLimit: '2시간',
+              targetPhoneNumber: data.phone || '010-0000-0000',
+              connectionStatus: 'linked',
+              consentGranted: true,
+              selectedIllnesses: data.illnesses.split(',').map(s => s.trim()).filter(Boolean),
+            }, {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            console.log('기저질환 연동 적재 완료');
+          } catch (gpsErr) {
+            console.warn('GPS Illness creation failed during register:', gpsErr);
+          }
+        }
+
+        // 2. 복약 약물 입력이 존재할 경우 가입과 동시에 백엔드 복약 알림 원장 자동 연동 생성
+        if (data.medications) {
+          try {
+            const meds = data.medications.split(',').map(s => s.trim()).filter(Boolean);
+            for (const med of meds) {
+              await api.post('/api/notifications/medications', {
+                medicineName: med,
+                dosage: '1회 1정',
+                times: ['09:00'],
+                days: ['월', '화', '수', '목', '금', '토', '일'],
+              }, {
+                headers: { 'Authorization': `Bearer ${token}` }
+              });
+            }
+            console.log('복약 알림 원장 연동 생성 완료');
+          } catch (medErr) {
+            console.warn('Medication alarm creation failed during register:', medErr);
           }
         }
 
@@ -412,6 +456,22 @@ const [showPasswordConfirm, setShowPasswordConfirm] = useState(false);
                 return (!isNaN(num) && num >= 2 && num <= 250) || '몸무게는 2kg~250kg 사이여야 합니다';
               }
             }}
+          />
+
+          <Field
+            name="illnesses"
+            label="기저 질환 (선택 입력)"
+            placeholder="예) 고혈압, 당뇨, 치매 (쉼표 구분)"
+            control={control}
+            errors={errors}
+          />
+
+          <Field
+            name="medications"
+            label="복약 중인 약물 (선택 입력)"
+            placeholder="예) 아스피린, 오메가3 (쉼표 구분)"
+            control={control}
+            errors={errors}
           />
   
           <TouchableOpacity
